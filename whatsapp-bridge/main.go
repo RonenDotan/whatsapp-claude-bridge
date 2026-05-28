@@ -189,7 +189,8 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 		saveSession(chatJID, resp.SessionID)
 	}
 
-	success, msg := sendWhatsAppMessage(client, chatJID, resp.Result, "")
+	replyText := "🤖🇫🇷 " + resp.Result
+	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
 	if !success {
 		fmt.Printf("Failed to send Claude reply to %s: %s\n", chatJID, msg)
 	}
