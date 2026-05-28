@@ -10,10 +10,12 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -46,15 +48,99 @@ type MessageStore struct {
 	db *sql.DB
 }
 
+// storeDir returns an absolute path to the "store" directory next to the executable,
+// so the bridge works correctly regardless of the working directory it is launched from.
+func storeDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "store"
+	}
+	return filepath.Join(filepath.Dir(exe), "store")
+}
+
+var (
+	sessionsMu   sync.Mutex
+	sessionsFile = filepath.Join(storeDir(), "sessions.json")
+)
+
+func loadSessions() map[string]string {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	data, err := os.ReadFile(sessionsFile)
+	if err != nil {
+		return make(map[string]string)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return make(map[string]string)
+	}
+	return m
+}
+
+func saveSession(jid, sessionID string) {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	m := make(map[string]string)
+	if data, err := os.ReadFile(sessionsFile); err == nil {
+		json.Unmarshal(data, &m)
+	}
+	m[jid] = sessionID
+	data, _ := json.MarshalIndent(m, "", "  ")
+	os.WriteFile(sessionsFile, data, 0644)
+}
+
+func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
+	sessions := loadSessions()
+	sessionID, hasSession := sessions[chatJID]
+
+	args := []string{"-p", "--output-format", "json"}
+	if hasSession && sessionID != "" {
+		args = append(args, "--resume", sessionID)
+	}
+
+	cmd := exec.Command("claude", args...)
+	cmd.Stdin = strings.NewReader(messageText)
+
+	out, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("Claude CLI error for %s: %v\n", chatJID, err)
+		return
+	}
+
+	var resp struct {
+		Result    string `json:"result"`
+		SessionID string `json:"session_id"`
+		IsError   bool   `json:"is_error"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		fmt.Printf("Failed to parse Claude response: %v\nOutput: %s\n", err, string(out))
+		return
+	}
+	if resp.IsError || resp.Result == "" {
+		fmt.Printf("Claude returned error or empty result for %s\n", chatJID)
+		return
+	}
+
+	if resp.SessionID != "" {
+		saveSession(chatJID, resp.SessionID)
+	}
+
+	success, msg := sendWhatsAppMessage(client, chatJID, resp.Result, "")
+	if !success {
+		fmt.Printf("Failed to send Claude reply to %s: %s\n", chatJID, msg)
+	}
+}
+
 // Initialize message store
 func NewMessageStore() (*MessageStore, error) {
+	dir := storeDir()
 	// Create directory for database if it doesn't exist
-	if err := os.MkdirAll("store", 0755); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create store directory: %v", err)
 	}
 
 	// Open SQLite database for messages
-	db, err := sql.Open("sqlite3", "file:store/messages.db?_foreign_keys=on")
+	db, err := sql.Open("sqlite3", "file:"+filepath.Join(dir, "messages.db")+"?_foreign_keys=on")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open message database: %v", err)
 	}
@@ -468,6 +554,11 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
 		}
 	}
+
+	// Forward inbound text messages to Claude
+	if !msg.Info.IsFromMe && content != "" {
+		go handleWithClaude(client, chatJID, content)
+	}
 }
 
 // DownloadMediaRequest represents the request body for the download media API
@@ -641,7 +732,7 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	}
 
 	// Download the media using whatsmeow client
-	mediaData, err := client.Download(downloader)
+	mediaData, err := client.Download(context.Background(), downloader)
 	if err != nil {
 		return false, "", "", "", fmt.Errorf("failed to download media: %v", err)
 	}
@@ -795,19 +886,20 @@ func main() {
 	dbLog := waLog.Stdout("Database", "INFO", true)
 
 	// Create directory for database if it doesn't exist
-	if err := os.MkdirAll("store", 0755); err != nil {
+	dir := storeDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		logger.Errorf("Failed to create store directory: %v", err)
 		return
 	}
 
-	container, err := sqlstore.New("sqlite3", "file:store/whatsapp.db?_foreign_keys=on", dbLog)
+	container, err := sqlstore.New(context.Background(), "sqlite3", "file:"+filepath.Join(dir, "whatsapp.db")+"?_foreign_keys=on", dbLog)
 	if err != nil {
 		logger.Errorf("Failed to connect to database: %v", err)
 		return
 	}
 
 	// Get device store - This contains session information
-	deviceStore, err := container.GetFirstDevice()
+	deviceStore, err := container.GetFirstDevice(context.Background())
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// No device exists, create one
@@ -973,7 +1065,7 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 
 		// If we didn't get a name, try group info
 		if name == "" {
-			groupInfo, err := client.GetGroupInfo(jid)
+			groupInfo, err := client.GetGroupInfo(context.Background(), jid)
 			if err == nil && groupInfo.Name != "" {
 				name = groupInfo.Name
 			} else {
@@ -988,7 +1080,7 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 		logger.Infof("Getting name for contact: %s", chatJID)
 
 		// Just use contact info (full name)
-		contact, err := client.Store.Contacts.GetContact(jid)
+		contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
 		if err == nil && contact.FullName != "" {
 			name = contact.FullName
 		} else if sender != "" {
