@@ -103,6 +103,30 @@ func initAllowedChats() {
 	allowedChatsMu.Unlock()
 }
 
+var (
+	sentMessagesMu sync.Mutex
+	sentMessageIDs = make(map[string]struct{})
+)
+
+func markSentMessage(msgID string) {
+	sentMessagesMu.Lock()
+	defer sentMessagesMu.Unlock()
+	sentMessageIDs[msgID] = struct{}{}
+	if len(sentMessageIDs) > 100 {
+		for k := range sentMessageIDs {
+			delete(sentMessageIDs, k)
+			break
+		}
+	}
+}
+
+func isSentByUs(msgID string) bool {
+	sentMessagesMu.Lock()
+	defer sentMessagesMu.Unlock()
+	_, ok := sentMessageIDs[msgID]
+	return ok
+}
+
 func loadSessions() map[string]string {
 	sessionsMu.Lock()
 	defer sessionsMu.Unlock()
@@ -488,12 +512,13 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 	}
 
 	// Send message
-	_, err = client.SendMessage(context.Background(), recipientJID, msg)
+	sendResp, err := client.SendMessage(context.Background(), recipientJID, msg)
 
 	if err != nil {
 		return false, fmt.Sprintf("Error sending message: %v", err)
 	}
 
+	markSentMessage(sendResp.ID)
 	return true, fmt.Sprintf("Message sent to %s", recipient)
 }
 
@@ -595,8 +620,8 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		}
 	}
 
-	// Forward inbound text messages to Claude (whitelisted chats only)
-	if !msg.Info.IsFromMe && content != "" && isAllowedChat(chatJID) {
+	// Forward text messages to Claude (whitelisted chats, skip our own echoes)
+	if content != "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
 		go handleWithClaude(client, chatJID, content)
 	}
 }
