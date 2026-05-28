@@ -59,6 +59,7 @@ func storeDir() string {
 }
 
 const defaultAllowedChat = "120363409956054412@g.us"
+const codexGroupJID = "120363407895179577@g.us"
 
 var (
 	sessionsMu       sync.Mutex
@@ -193,6 +194,34 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
 	if !success {
 		fmt.Printf("Failed to send Claude reply to %s: %s\n", chatJID, msg)
+	}
+}
+
+func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
+	cmd := exec.Command("codex", "exec",
+		"--ephemeral",
+		"--skip-git-repo-check",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"-s", "workspace-write",
+		messageText,
+	)
+
+	out, err := cmd.Output()
+	if err != nil {
+		fmt.Printf("Codex exec error for %s: %v\nOutput: %s\n", chatJID, err, string(out))
+		return
+	}
+
+	reply := strings.TrimSpace(string(out))
+	if reply == "" {
+		fmt.Printf("Codex returned empty reply for %s\n", chatJID)
+		return
+	}
+
+	replyText := "🤖🇫🇷 " + reply
+	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
+	if !success {
+		fmt.Printf("Failed to send Codex reply to %s: %s\n", chatJID, msg)
 	}
 }
 
@@ -621,9 +650,13 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		}
 	}
 
-	// Forward text messages to Claude (whitelisted chats, skip our own echoes)
+	// Forward text messages to the appropriate handler (whitelisted chats, skip our own echoes)
 	if content != "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
-		go handleWithClaude(client, chatJID, content)
+		if chatJID == codexGroupJID {
+			go handleWithCodex(client, chatJID, content)
+		} else {
+			go handleWithClaude(client, chatJID, content)
+		}
 	}
 }
 
