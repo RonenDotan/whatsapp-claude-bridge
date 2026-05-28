@@ -58,10 +58,50 @@ func storeDir() string {
 	return filepath.Join(filepath.Dir(exe), "store")
 }
 
+const defaultAllowedChat = "120363409956054412@g.us"
+
 var (
-	sessionsMu   sync.Mutex
-	sessionsFile = filepath.Join(storeDir(), "sessions.json")
+	sessionsMu       sync.Mutex
+	sessionsFile     = filepath.Join(storeDir(), "sessions.json")
+	allowedChatsFile = filepath.Join(storeDir(), "allowed_chats.json")
+	allowedChats     map[string]struct{}
+	allowedChatsMu   sync.RWMutex
 )
+
+func loadAllowedChats() map[string]struct{} {
+	data, err := os.ReadFile(allowedChatsFile)
+	if err != nil {
+		return map[string]struct{}{defaultAllowedChat: {}}
+	}
+	var jids []string
+	if err := json.Unmarshal(data, &jids); err != nil || len(jids) == 0 {
+		return map[string]struct{}{defaultAllowedChat: {}}
+	}
+	m := make(map[string]struct{}, len(jids))
+	for _, j := range jids {
+		m[j] = struct{}{}
+	}
+	return m
+}
+
+func isAllowedChat(jid string) bool {
+	allowedChatsMu.RLock()
+	defer allowedChatsMu.RUnlock()
+	_, ok := allowedChats[jid]
+	return ok
+}
+
+func initAllowedChats() {
+	dir := storeDir()
+	os.MkdirAll(dir, 0755)
+	if _, err := os.Stat(allowedChatsFile); os.IsNotExist(err) {
+		data, _ := json.MarshalIndent([]string{defaultAllowedChat}, "", "  ")
+		os.WriteFile(allowedChatsFile, data, 0644)
+	}
+	allowedChatsMu.Lock()
+	allowedChats = loadAllowedChats()
+	allowedChatsMu.Unlock()
+}
 
 func loadSessions() map[string]string {
 	sessionsMu.Lock()
@@ -555,8 +595,8 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		}
 	}
 
-	// Forward inbound text messages to Claude
-	if !msg.Info.IsFromMe && content != "" {
+	// Forward inbound text messages to Claude (whitelisted chats only)
+	if !msg.Info.IsFromMe && content != "" && isAllowedChat(chatJID) {
 		go handleWithClaude(client, chatJID, content)
 	}
 }
@@ -881,6 +921,10 @@ func main() {
 	// Set up logger
 	logger := waLog.Stdout("Client", "INFO", true)
 	logger.Infof("Starting WhatsApp client...")
+
+	// Load chat whitelist (creates default allowed_chats.json if absent)
+	initAllowedChats()
+	logger.Infof("Loaded %d allowed chat(s) for Claude handler", len(allowedChats))
 
 	// Create database connection for storing session data
 	dbLog := waLog.Stdout("Database", "INFO", true)
