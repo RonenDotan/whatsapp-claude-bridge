@@ -224,6 +224,7 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	}
 
 	cmd := exec.Command("claude", args...)
+	cmd.Dir = filepath.Dir(storeDir())
 	cmd.Stdin = strings.NewReader(messageText)
 
 	out, err := cmd.Output()
@@ -405,6 +406,7 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 	}
 
 	cmd := exec.Command("codex", args...)
+	cmd.Dir = filepath.Dir(storeDir())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatJID, err, string(out))
