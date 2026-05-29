@@ -111,6 +111,20 @@ var (
 	sentMessageIDs = make(map[string]struct{})
 )
 
+type UsageStats struct {
+	CacheReadTokens  int     `json:"cache_read_input_tokens"`
+	CacheWriteTokens int     `json:"cache_creation_input_tokens"`
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	TotalCostUSD     float64 `json:"total_cost_usd"`
+	LastUpdated      string
+}
+
+var (
+	usageStatsMu  sync.Mutex
+	usageStatsMap = make(map[string]UsageStats)
+)
+
 func markSentMessage(msgID string) {
 	sentMessagesMu.Lock()
 	defer sentMessagesMu.Unlock()
@@ -204,6 +218,13 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 		Result    string `json:"result"`
 		SessionID string `json:"session_id"`
 		IsError   bool   `json:"is_error"`
+		Usage     struct {
+			CacheReadTokens  int     `json:"cache_read_input_tokens"`
+			CacheWriteTokens int     `json:"cache_creation_input_tokens"`
+			InputTokens      int     `json:"input_tokens"`
+			OutputTokens     int     `json:"output_tokens"`
+			TotalCostUSD     float64 `json:"total_cost_usd"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(out, &resp); err != nil {
 		fmt.Printf("Failed to parse Claude response: %v\nOutput: %s\n", err, string(out))
@@ -217,6 +238,17 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	if resp.SessionID != "" {
 		saveSession(chatJID, resp.SessionID)
 	}
+
+	usageStatsMu.Lock()
+	usageStatsMap[chatJID] = UsageStats{
+		CacheReadTokens:  resp.Usage.CacheReadTokens,
+		CacheWriteTokens: resp.Usage.CacheWriteTokens,
+		InputTokens:      resp.Usage.InputTokens,
+		OutputTokens:     resp.Usage.OutputTokens,
+		TotalCostUSD:     resp.Usage.TotalCostUSD,
+		LastUpdated:      time.Now().Format("2006-01-02 15:04:05"),
+	}
+	usageStatsMu.Unlock()
 
 	replyText := "🤖🇫🇷 " + resp.Result
 	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
@@ -241,19 +273,47 @@ func extractCodexReply(output string) string {
 	return strings.TrimSpace(output)
 }
 
+func parseCodexSessionID(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "session id: ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "session id: "))
+		}
+	}
+	return ""
+}
+
 func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
-	cmd := exec.Command("codex", "exec",
-		"--ephemeral",
-		"--skip-git-repo-check",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"-s", "workspace-write",
-		messageText)
+	sessions := loadCodexSessions()
+	sessionID := sessions[chatJID]
+
+	var args []string
+	if sessionID != "" {
+		args = []string{"exec", "resume", sessionID,
+			"--skip-git-repo-check",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"-s", "workspace-write",
+			messageText}
+	} else {
+		args = []string{"exec",
+			"--skip-git-repo-check",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"-s", "workspace-write",
+			messageText}
+	}
+
+	cmd := exec.Command("codex", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatJID, err, string(out))
 		return
 	}
-	replyText := "🤖⚡ " + extractCodexReply(string(out))
+
+	rawOutput := string(out)
+	if newID := parseCodexSessionID(rawOutput); newID != "" {
+		saveCodexSession(chatJID, newID)
+	}
+
+	replyText := "🤖⚡ " + extractCodexReply(rawOutput)
 	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
 	if !success {
 		log.Printf("Failed to send Codex reply to %s: %s", chatJID, msg)
@@ -690,7 +750,32 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		if chatJID == codexGroupJID {
 			go handleWithCodex(client, chatJID, content)
 		} else {
-			go handleWithClaude(client, chatJID, content)
+			lower := strings.ToLower(content)
+			isStatsQuery := strings.Contains(lower, "cache") ||
+				strings.Contains(lower, "cost") ||
+				strings.Contains(lower, "tokens used") ||
+				strings.Contains(lower, "usage stats") ||
+				strings.Contains(lower, "how much") ||
+				strings.Contains(lower, "spending")
+			if isStatsQuery {
+				usageStatsMu.Lock()
+				stats, ok := usageStatsMap[chatJID]
+				usageStatsMu.Unlock()
+				var reply string
+				if !ok {
+					reply = "No stats yet — send a message first."
+				} else {
+					reply = fmt.Sprintf(
+						"📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Last updated: %s",
+						stats.CacheReadTokens, stats.CacheWriteTokens,
+						stats.InputTokens, stats.OutputTokens,
+						stats.TotalCostUSD, stats.LastUpdated,
+					)
+				}
+				sendWhatsAppMessage(client, chatJID, reply, "")
+			} else {
+				go handleWithClaude(client, chatJID, content)
+			}
 		}
 	}
 }
