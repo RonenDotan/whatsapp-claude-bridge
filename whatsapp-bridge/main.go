@@ -111,18 +111,36 @@ var (
 	sentMessageIDs = make(map[string]struct{})
 )
 
+type ModelUsageEntry struct {
+	InputTokens     int     `json:"input_tokens"`
+	OutputTokens    int     `json:"output_tokens"`
+	CacheReadTokens int     `json:"cache_read_input_tokens"`
+	CostUSD         float64 `json:"cost_usd"`
+}
+
 type UsageStats struct {
-	CacheReadTokens  int     `json:"cache_read_input_tokens"`
-	CacheWriteTokens int     `json:"cache_creation_input_tokens"`
-	InputTokens      int     `json:"input_tokens"`
-	OutputTokens     int     `json:"output_tokens"`
-	TotalCostUSD     float64 `json:"total_cost_usd"`
+	CacheReadTokens  int                        `json:"cache_read_input_tokens"`
+	CacheWriteTokens int                        `json:"cache_creation_input_tokens"`
+	InputTokens      int                        `json:"input_tokens"`
+	OutputTokens     int                        `json:"output_tokens"`
+	TotalCostUSD     float64                    `json:"total_cost_usd"`
+	DurationMs       int                        `json:"duration_ms"`
+	ModelUsage       map[string]ModelUsageEntry `json:"model_usage,omitempty"`
 	LastUpdated      string
+}
+
+type CodexStats struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	LastUpdated  string
 }
 
 var (
 	usageStatsMu  sync.Mutex
 	usageStatsMap = make(map[string]UsageStats)
+	codexStatsMu  sync.Mutex
+	codexStatsMap = make(map[string]CodexStats)
 )
 
 func markSentMessage(msgID string) {
@@ -215,16 +233,23 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	}
 
 	var resp struct {
-		Result    string `json:"result"`
-		SessionID string `json:"session_id"`
-		IsError   bool   `json:"is_error"`
-		Usage     struct {
+		Result     string `json:"result"`
+		SessionID  string `json:"session_id"`
+		IsError    bool   `json:"is_error"`
+		DurationMs int    `json:"duration_ms"`
+		Usage      struct {
 			CacheReadTokens  int     `json:"cache_read_input_tokens"`
 			CacheWriteTokens int     `json:"cache_creation_input_tokens"`
 			InputTokens      int     `json:"input_tokens"`
 			OutputTokens     int     `json:"output_tokens"`
 			TotalCostUSD     float64 `json:"total_cost_usd"`
 		} `json:"usage"`
+		ModelUsage map[string]struct {
+			InputTokens     int     `json:"input_tokens"`
+			OutputTokens    int     `json:"output_tokens"`
+			CacheReadTokens int     `json:"cache_read_input_tokens"`
+			CostUSD         float64 `json:"cost_usd"`
+		} `json:"modelUsage"`
 	}
 	if err := json.Unmarshal(out, &resp); err != nil {
 		fmt.Printf("Failed to parse Claude response: %v\nOutput: %s\n", err, string(out))
@@ -239,6 +264,15 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 		saveSession(chatJID, resp.SessionID)
 	}
 
+	modelUsage := make(map[string]ModelUsageEntry, len(resp.ModelUsage))
+	for model, mu := range resp.ModelUsage {
+		modelUsage[model] = ModelUsageEntry{
+			InputTokens:     mu.InputTokens,
+			OutputTokens:    mu.OutputTokens,
+			CacheReadTokens: mu.CacheReadTokens,
+			CostUSD:         mu.CostUSD,
+		}
+	}
 	usageStatsMu.Lock()
 	usageStatsMap[chatJID] = UsageStats{
 		CacheReadTokens:  resp.Usage.CacheReadTokens,
@@ -246,6 +280,8 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 		InputTokens:      resp.Usage.InputTokens,
 		OutputTokens:     resp.Usage.OutputTokens,
 		TotalCostUSD:     resp.Usage.TotalCostUSD,
+		DurationMs:       resp.DurationMs,
+		ModelUsage:       modelUsage,
 		LastUpdated:      time.Now().Format("2006-01-02 15:04:05"),
 	}
 	usageStatsMu.Unlock()
@@ -282,15 +318,79 @@ func parseCodexSessionID(output string) string {
 	return ""
 }
 
+// parseCodexJSONL scans JSONL event output from codex --json for session ID and token usage.
+// It tries multiple common event shapes since the format may vary by codex version.
+func parseCodexJSONL(output string) (sessionID string, inputTokens, outputTokens int) {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var ev map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+
+		// Session ID — try top-level "session_id", "id" on session events, or nested "session.id"
+		if sid, _ := ev["session_id"].(string); sid != "" {
+			sessionID = sid
+		}
+		if typ, _ := ev["type"].(string); strings.Contains(strings.ToLower(typ), "session") {
+			if sid, _ := ev["id"].(string); sid != "" {
+				sessionID = sid
+			}
+		}
+		if sess, ok := ev["session"].(map[string]interface{}); ok {
+			if sid, _ := sess["id"].(string); sid != "" {
+				sessionID = sid
+			}
+		}
+
+		// Token usage — try top-level "usage", nested "response.usage", and "data.usage"
+		extractUsage := func(u map[string]interface{}) {
+			if v, _ := u["input_tokens"].(float64); v > 0 {
+				inputTokens = int(v)
+			} else if v, _ := u["prompt_tokens"].(float64); v > 0 {
+				inputTokens = int(v)
+			}
+			if v, _ := u["output_tokens"].(float64); v > 0 {
+				outputTokens = int(v)
+			} else if v, _ := u["completion_tokens"].(float64); v > 0 {
+				outputTokens = int(v)
+			}
+		}
+		if u, ok := ev["usage"].(map[string]interface{}); ok {
+			extractUsage(u)
+		}
+		if resp, ok := ev["response"].(map[string]interface{}); ok {
+			if u, ok := resp["usage"].(map[string]interface{}); ok {
+				extractUsage(u)
+			}
+		}
+		if data, ok := ev["data"].(map[string]interface{}); ok {
+			if u, ok := data["usage"].(map[string]interface{}); ok {
+				extractUsage(u)
+			}
+		}
+	}
+	return
+}
+
 func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 	sessions := loadCodexSessions()
 	sessionID := sessions[chatJID]
 
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("codex_reply_%d.txt", time.Now().UnixNano()))
+	defer os.Remove(tmpFile)
+
 	var args []string
 	if sessionID != "" {
-		args = []string{"exec", "resume", sessionID, messageText}
+		args = []string{"exec", "--json", "--output-last-message", tmpFile,
+			"resume", sessionID, messageText}
 	} else {
 		args = []string{"exec",
+			"--json",
+			"--output-last-message", tmpFile,
 			"--skip-git-repo-check",
 			"--dangerously-bypass-approvals-and-sandbox",
 			"-s", "workspace-write",
@@ -305,12 +405,33 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 	}
 
 	rawOutput := string(out)
-	if newID := parseCodexSessionID(rawOutput); newID != "" {
+	newID, inputTokens, outputTokens := parseCodexJSONL(rawOutput)
+
+	if newID != "" {
 		saveCodexSession(chatJID, newID)
+	} else if textID := parseCodexSessionID(rawOutput); textID != "" {
+		saveCodexSession(chatJID, textID)
 	}
 
-	replyText := "🤖⚡ " + extractCodexReply(rawOutput)
-	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
+	if inputTokens > 0 || outputTokens > 0 {
+		codexStatsMu.Lock()
+		codexStatsMap[chatJID] = CodexStats{
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			TotalTokens:  inputTokens + outputTokens,
+			LastUpdated:  time.Now().Format("2006-01-02 15:04:05"),
+		}
+		codexStatsMu.Unlock()
+	}
+
+	var replyText string
+	if data, err := os.ReadFile(tmpFile); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		replyText = strings.TrimSpace(string(data))
+	} else {
+		replyText = extractCodexReply(rawOutput)
+	}
+
+	success, msg := sendWhatsAppMessage(client, chatJID, "🤖⚡ "+replyText, "")
 	if !success {
 		log.Printf("Failed to send Codex reply to %s: %s", chatJID, msg)
 	}
@@ -744,7 +865,27 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 	// Forward text messages to the appropriate handler (whitelisted chats, skip our own echoes)
 	if content != "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
 		if chatJID == codexGroupJID {
-			go handleWithCodex(client, chatJID, content)
+			lower := strings.ToLower(content)
+			isCodexStatsQuery := strings.Contains(lower, "tokens") ||
+				strings.Contains(lower, "usage") ||
+				strings.Contains(lower, "cost")
+			if isCodexStatsQuery {
+				codexStatsMu.Lock()
+				cStats, cOk := codexStatsMap[chatJID]
+				codexStatsMu.Unlock()
+				var cReply string
+				if !cOk {
+					cReply = "No stats yet — send a message first."
+				} else {
+					cReply = fmt.Sprintf(
+						"📊 Codex stats:\n• Input tokens: %d\n• Output tokens: %d\n• Total tokens: %d\n• Last updated: %s",
+						cStats.InputTokens, cStats.OutputTokens, cStats.TotalTokens, cStats.LastUpdated,
+					)
+				}
+				sendWhatsAppMessage(client, chatJID, cReply, "")
+			} else {
+				go handleWithCodex(client, chatJID, content)
+			}
 		} else {
 			lower := strings.ToLower(content)
 			isStatsQuery := strings.Contains(lower, "cache") ||
@@ -761,12 +902,20 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 				if !ok {
 					reply = "No stats yet — send a message first."
 				} else {
+					durationSec := float64(stats.DurationMs) / 1000.0
 					reply = fmt.Sprintf(
-						"📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Last updated: %s",
+						"📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Response time: %.1fs\n• Last updated: %s",
 						stats.CacheReadTokens, stats.CacheWriteTokens,
 						stats.InputTokens, stats.OutputTokens,
-						stats.TotalCostUSD, stats.LastUpdated,
+						stats.TotalCostUSD, durationSec, stats.LastUpdated,
 					)
+					if len(stats.ModelUsage) > 1 {
+						reply += "\n\nPer-model breakdown:"
+						for model, mu := range stats.ModelUsage {
+							reply += fmt.Sprintf("\n• %s: %d in / %d out, $%.4f",
+								model, mu.InputTokens, mu.OutputTokens, mu.CostUSD)
+						}
+					}
 				}
 				sendWhatsAppMessage(client, chatJID, reply, "")
 			} else {
