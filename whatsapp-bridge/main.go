@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"unicode"
 	"syscall"
 	"time"
 
@@ -143,6 +144,11 @@ var (
 	codexStatsMap = make(map[string]CodexStats)
 )
 
+var (
+	replyHistoryMu sync.Mutex
+	replyHistory   = make(map[string][]string) // chatJID -> last 5 replies
+)
+
 func markSentMessage(msgID string) {
 	sentMessagesMu.Lock()
 	defer sentMessagesMu.Unlock()
@@ -212,6 +218,103 @@ func saveCodexSession(jid, threadID string) {
 	m[jid] = threadID
 	data, _ := json.MarshalIndent(m, "", "  ")
 	os.WriteFile(codexSessionsFile, data, 0644)
+}
+
+func addToReplyHistory(chatJID, reply string) {
+	replyHistoryMu.Lock()
+	defer replyHistoryMu.Unlock()
+	h := replyHistory[chatJID]
+	h = append(h, reply)
+	if len(h) > 5 {
+		h = h[len(h)-5:]
+	}
+	replyHistory[chatJID] = h
+}
+
+func normalizeForSimilarity(s string) []string {
+	s = strings.ToLower(s)
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+			return r
+		}
+		return ' '
+	}, s)
+	return strings.Fields(s)
+}
+
+func isSimilar(a, b string) bool {
+	wordsA := normalizeForSimilarity(a)
+	wordsB := normalizeForSimilarity(b)
+	if len(wordsA) == 0 && len(wordsB) == 0 {
+		return true
+	}
+	setA := make(map[string]bool, len(wordsA))
+	for _, w := range wordsA {
+		setA[w] = true
+	}
+	setB := make(map[string]bool, len(wordsB))
+	for _, w := range wordsB {
+		setB[w] = true
+	}
+	intersection := 0
+	for w := range setA {
+		if setB[w] {
+			intersection++
+		}
+	}
+	union := len(setA) + len(setB) - intersection
+	if union == 0 {
+		return true
+	}
+	return float64(intersection)/float64(union) >= 0.80
+}
+
+func isLooping(chatJID, newReply string) bool {
+	replyHistoryMu.Lock()
+	defer replyHistoryMu.Unlock()
+	history := replyHistory[chatJID]
+	similar := 0
+	for _, prev := range history {
+		if isSimilar(prev, newReply) {
+			similar++
+		}
+	}
+	return similar >= 2
+}
+
+func deleteSession(jid string) {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	m := make(map[string]string)
+	if data, err := os.ReadFile(sessionsFile); err == nil {
+		json.Unmarshal(data, &m)
+	}
+	delete(m, jid)
+	data, _ := json.MarshalIndent(m, "", "  ")
+	os.WriteFile(sessionsFile, data, 0644)
+}
+
+func deleteCodexSession(jid string) {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	m := make(map[string]string)
+	if data, err := os.ReadFile(codexSessionsFile); err == nil {
+		json.Unmarshal(data, &m)
+	}
+	delete(m, jid)
+	data, _ := json.MarshalIndent(m, "", "  ")
+	os.WriteFile(codexSessionsFile, data, 0644)
+}
+
+func handleClearSession(client *whatsmeow.Client, chatJID string) {
+	deleteSession(chatJID)
+	deleteCodexSession(chatJID)
+
+	replyHistoryMu.Lock()
+	delete(replyHistory, chatJID)
+	replyHistoryMu.Unlock()
+
+	sendWhatsAppMessage(client, chatJID, "✅ Session cleared for this chat. Next message starts fresh.", "")
 }
 
 func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
@@ -295,6 +398,11 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	usageStatsMu.Unlock()
 
 	replyText := "🤖🇫🇷 " + resp.Result
+	if isLooping(chatJID, replyText) {
+		sendWhatsAppMessage(client, chatJID, "⚠️ Loop detected — I seem to be repeating myself. Try rephrasing your question or type 'clear session' to start fresh.", "")
+		return
+	}
+	addToReplyHistory(chatJID, replyText)
 	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
 	if !success {
 		fmt.Printf("Failed to send Claude reply to %s: %s\n", chatJID, msg)
@@ -450,7 +558,13 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 		replyText = extractCodexReply(rawOutput)
 	}
 
-	success, msg := sendWhatsAppMessage(client, chatJID, "🤖⚡ "+replyText, "")
+	fullReply := "🤖⚡ " + replyText
+	if isLooping(chatJID, fullReply) {
+		sendWhatsAppMessage(client, chatJID, "⚠️ Loop detected — I seem to be repeating myself. Try rephrasing your question or type 'clear session' to start fresh.", "")
+		return
+	}
+	addToReplyHistory(chatJID, fullReply)
+	success, msg := sendWhatsAppMessage(client, chatJID, fullReply, "")
 	if !success {
 		log.Printf("Failed to send Codex reply to %s: %s", chatJID, msg)
 	}
@@ -883,6 +997,10 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 
 	// Forward text messages to the appropriate handler (whitelisted chats, skip our own echoes)
 	if content != "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
+		if strings.Contains(strings.ToLower(content), "clear session") {
+			go handleClearSession(client, chatJID)
+			return
+		}
 		if chatJID == codexGroupJID {
 			lower := strings.ToLower(content)
 			isCodexStatsQuery := strings.Contains(lower, "tokens") ||
