@@ -229,6 +229,7 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	out, err := cmd.Output()
 	if err != nil {
 		fmt.Printf("Claude CLI error for %s: %v\n", chatJID, err)
+		sendWhatsAppMessage(client, chatJID, "⚠️ Claude unreachable: "+err.Error(), "")
 		return
 	}
 
@@ -253,10 +254,16 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	}
 	if err := json.Unmarshal(out, &resp); err != nil {
 		fmt.Printf("Failed to parse Claude response: %v\nOutput: %s\n", err, string(out))
+		sendWhatsAppMessage(client, chatJID, "⚠️ Bridge parse error: "+err.Error(), "")
 		return
 	}
-	if resp.IsError || resp.Result == "" {
-		fmt.Printf("Claude returned error or empty result for %s\n", chatJID)
+	if resp.IsError {
+		fmt.Printf("Claude returned error for %s: %s\n", chatJID, resp.Result)
+		sendWhatsAppMessage(client, chatJID, "⚠️ Claude error: "+resp.Result, "")
+		return
+	}
+	if resp.Result == "" {
+		fmt.Printf("Claude returned empty result for %s\n", chatJID)
 		return
 	}
 
@@ -401,6 +408,16 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatJID, err, string(out))
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed != "" {
+			exitCode := -1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			sendWhatsAppMessage(client, chatJID, fmt.Sprintf("⚠️ Codex error (exit %d): %s", exitCode, trimmed), "")
+		} else {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Codex error: "+err.Error(), "")
+		}
 		return
 	}
 
