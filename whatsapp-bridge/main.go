@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
@@ -62,11 +63,12 @@ const defaultAllowedChat = "120363409956054412@g.us"
 const codexGroupJID = "120363407895179577@g.us"
 
 var (
-	sessionsMu       sync.Mutex
-	sessionsFile     = filepath.Join(storeDir(), "sessions.json")
-	allowedChatsFile = filepath.Join(storeDir(), "allowed_chats.json")
-	allowedChats     map[string]struct{}
-	allowedChatsMu   sync.RWMutex
+	sessionsMu        sync.Mutex
+	sessionsFile      = filepath.Join(storeDir(), "sessions.json")
+	codexSessionsFile = filepath.Join(storeDir(), "codex_sessions.json")
+	allowedChatsFile  = filepath.Join(storeDir(), "allowed_chats.json")
+	allowedChats      map[string]struct{}
+	allowedChatsMu    sync.RWMutex
 )
 
 func loadAllowedChats() map[string]struct{} {
@@ -154,6 +156,32 @@ func saveSession(jid, sessionID string) {
 	os.WriteFile(sessionsFile, data, 0644)
 }
 
+func loadCodexSessions() map[string]string {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	data, err := os.ReadFile(codexSessionsFile)
+	if err != nil {
+		return make(map[string]string)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return make(map[string]string)
+	}
+	return m
+}
+
+func saveCodexSession(jid, threadID string) {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	m := make(map[string]string)
+	if data, err := os.ReadFile(codexSessionsFile); err == nil {
+		json.Unmarshal(data, &m)
+	}
+	m[jid] = threadID
+	data, _ := json.MarshalIndent(m, "", "  ")
+	os.WriteFile(codexSessionsFile, data, 0644)
+}
+
 func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	sessions := loadSessions()
 	sessionID, hasSession := sessions[chatJID]
@@ -203,25 +231,16 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 		"--skip-git-repo-check",
 		"--dangerously-bypass-approvals-and-sandbox",
 		"-s", "workspace-write",
-		messageText,
-	)
-
-	out, err := cmd.Output()
+		messageText)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("Codex exec error for %s: %v\nOutput: %s\n", chatJID, err, string(out))
+		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatJID, err, string(out))
 		return
 	}
-
-	reply := strings.TrimSpace(string(out))
-	if reply == "" {
-		fmt.Printf("Codex returned empty reply for %s\n", chatJID)
-		return
-	}
-
-	replyText := "🤖🇫🇷 " + reply
+	replyText := "🤖🇫🇷 " + strings.TrimSpace(string(out))
 	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
 	if !success {
-		fmt.Printf("Failed to send Codex reply to %s: %s\n", chatJID, msg)
+		log.Printf("Failed to send Codex reply to %s: %s", chatJID, msg)
 	}
 }
 
