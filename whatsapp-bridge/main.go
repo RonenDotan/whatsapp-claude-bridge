@@ -288,11 +288,7 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 
 	var args []string
 	if sessionID != "" {
-		args = []string{"exec", "resume", sessionID,
-			"--skip-git-repo-check",
-			"--dangerously-bypass-approvals-and-sandbox",
-			"-s", "workspace-write",
-			messageText}
+		args = []string{"exec", "resume", sessionID, messageText}
 	} else {
 		args = []string{"exec",
 			"--skip-git-repo-check",
