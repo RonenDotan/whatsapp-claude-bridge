@@ -225,6 +225,22 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	}
 }
 
+func extractCodexReply(output string) string {
+	marker := "tokens used\n"
+	idx := strings.LastIndex(output, marker)
+	if idx >= 0 {
+		rest := output[idx+len(marker):]
+		newline := strings.Index(rest, "\n")
+		if newline >= 0 {
+			reply := strings.TrimSpace(rest[newline+1:])
+			if reply != "" {
+				return reply
+			}
+		}
+	}
+	return strings.TrimSpace(output)
+}
+
 func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 	cmd := exec.Command("codex", "exec",
 		"--ephemeral",
@@ -237,7 +253,7 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatJID, err, string(out))
 		return
 	}
-	replyText := "🤖🇫🇷 " + strings.TrimSpace(string(out))
+	replyText := "🤖⚡ " + extractCodexReply(string(out))
 	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
 	if !success {
 		log.Printf("Failed to send Codex reply to %s: %s", chatJID, msg)
