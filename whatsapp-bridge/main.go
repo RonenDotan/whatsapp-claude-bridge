@@ -1110,6 +1110,21 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		}
 	}
 
+	// Transcribe incoming voice messages for allowed chats
+	if mediaType == "audio" && content == "" && !msg.Info.IsFromMe && isAllowedChat(chatJID) {
+		_, _, _, audioPath, dlErr := downloadMedia(client, messageStore, msg.Info.ID, chatJID)
+		if dlErr != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Could not download voice message: "+dlErr.Error(), "")
+			return
+		}
+		transcript, txErr := transcribeAudio(audioPath)
+		if txErr != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Could not transcribe voice message: "+txErr.Error(), "")
+			return
+		}
+		content = "[🎤 Voice]: " + transcript
+	}
+
 	// Forward text messages to the appropriate handler (whitelisted chats, skip our own echoes)
 	if content != "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
 		if strings.Contains(strings.ToLower(content), "clear session") {
@@ -1898,6 +1913,37 @@ func requestHistorySync(client *whatsmeow.Client) {
 	} else {
 		fmt.Println("History sync requested. Waiting for server response...")
 	}
+}
+
+// transcribeAudio runs whisper on the given audio file and returns the transcript text.
+// It cleans up both the input file and the generated .txt after reading.
+func transcribeAudio(filePath string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	tmpDir := os.TempDir()
+	cmd := exec.CommandContext(ctx, "whisper", filePath,
+		"--model", "base",
+		"--output_format", "txt",
+		"--language", "auto",
+		"--output_dir", tmpDir,
+	)
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("whisper failed: %w", err)
+	}
+
+	base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	txtPath := filepath.Join(tmpDir, base+".txt")
+	defer os.Remove(filePath)
+	defer os.Remove(txtPath)
+
+	data, err := os.ReadFile(txtPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read transcript: %w", err)
+	}
+
+	return strings.TrimSpace(string(data)), nil
 }
 
 // analyzeOggOpus tries to extract duration and generate a simple waveform from an Ogg Opus file
