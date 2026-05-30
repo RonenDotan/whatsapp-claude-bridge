@@ -1925,12 +1925,12 @@ func transcribeAudio(filePath string) (string, error) {
 	cmd := exec.CommandContext(ctx, "whisper", filePath,
 		"--model", "base",
 		"--output_format", "txt",
-		"--language", "auto",
 		"--output_dir", tmpDir,
 	)
+	cmd.Env = append(os.Environ(), "PYTHONUTF8=1")
 
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("whisper failed: %w", err)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("whisper failed: %w\noutput: %s", err, string(out))
 	}
 
 	base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
