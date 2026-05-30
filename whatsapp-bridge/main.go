@@ -107,6 +107,54 @@ func initAllowedChats() {
 	allowedChatsMu.Unlock()
 }
 
+func saveAllowedChats() error {
+	allowedChatsMu.RLock()
+	jids := make([]string, 0, len(allowedChats))
+	for jid := range allowedChats {
+		jids = append(jids, jid)
+	}
+	allowedChatsMu.RUnlock()
+	data, err := json.MarshalIndent(jids, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(allowedChatsFile, data, 0644)
+}
+
+func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFromMe bool) bool {
+	if !strings.HasPrefix(content, "!bridge ") {
+		return false
+	}
+	if !isFromMe {
+		sendWhatsAppMessage(client, chatJID, "⚠️ Only the bridge owner can use bridge commands", "")
+		return true
+	}
+	sub := strings.TrimSpace(strings.TrimPrefix(content, "!bridge "))
+	switch sub {
+	case "add":
+		allowedChatsMu.Lock()
+		allowedChats[chatJID] = struct{}{}
+		allowedChatsMu.Unlock()
+		if err := saveAllowedChats(); err != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
+			return true
+		}
+		sendWhatsAppMessage(client, chatJID, "✅ Chat added to bridge whitelist. Messages here will now be routed to Claude/Codex.", "")
+	case "remove":
+		allowedChatsMu.Lock()
+		delete(allowedChats, chatJID)
+		allowedChatsMu.Unlock()
+		if err := saveAllowedChats(); err != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
+			return true
+		}
+		sendWhatsAppMessage(client, chatJID, "✅ Chat removed from bridge whitelist.", "")
+	default:
+		sendWhatsAppMessage(client, chatJID, "Available commands: !bridge add, !bridge remove", "")
+	}
+	return true
+}
+
 var (
 	sentMessagesMu sync.Mutex
 	sentMessageIDs = make(map[string]struct{})
@@ -1066,6 +1114,11 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 
 	// Extract text content
 	content := extractTextContent(msg.Message)
+
+	// Handle !bridge commands from any chat, before the whitelist check
+	if handleBridgeCommand(client, chatJID, content, msg.Info.IsFromMe) {
+		return
+	}
 
 	// Extract media info
 	mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength := extractMediaInfo(msg.Message)
