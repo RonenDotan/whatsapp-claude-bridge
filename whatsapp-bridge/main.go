@@ -397,7 +397,7 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	}
 	usageStatsMu.Unlock()
 
-	replyText := "🤖🇫🇷 " + resp.Result
+	replyText := "🤖🇫🇷\n" + resp.Result
 	success, msg := sendWhatsAppMessage(client, chatJID, replyText, "")
 	if !success {
 		fmt.Printf("Failed to send Claude reply to %s: %s\n", chatJID, msg)
@@ -553,7 +553,7 @@ func handleWithCodex(client *whatsmeow.Client, chatJID, messageText string) {
 		replyText = extractCodexReply(rawOutput)
 	}
 
-	fullReply := "🤖⚡ " + replyText
+	fullReply := "🤖⚡\n" + replyText
 	success, msg := sendWhatsAppMessage(client, chatJID, fullReply, "")
 	if !success {
 		log.Printf("Failed to send Codex reply to %s: %s", chatJID, msg)
