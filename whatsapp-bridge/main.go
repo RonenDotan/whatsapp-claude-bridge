@@ -2048,7 +2048,7 @@ func requestHistorySync(client *whatsmeow.Client) {
 // transcribeAudio runs whisper on the given audio file and returns the transcript text.
 // It cleans up both the input file and the generated .txt after reading.
 func transcribeAudio(filePath string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	tmpDir := os.TempDir()
