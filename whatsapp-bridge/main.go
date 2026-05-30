@@ -1110,8 +1110,8 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		}
 	}
 
-	// Transcribe incoming voice messages for allowed chats
-	if mediaType == "audio" && content == "" && !msg.Info.IsFromMe && isAllowedChat(chatJID) {
+	// Transcribe voice messages for allowed chats (including own messages sent from phone)
+	if mediaType == "audio" && content == "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
 		_, _, _, audioPath, dlErr := downloadMedia(client, messageStore, msg.Info.ID, chatJID)
 		if dlErr != nil {
 			sendWhatsAppMessage(client, chatJID, "⚠️ Could not download voice message: "+dlErr.Error(), "")
