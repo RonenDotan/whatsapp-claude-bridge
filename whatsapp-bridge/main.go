@@ -64,12 +64,15 @@ const defaultAllowedChat = "120363409956054412@g.us"
 const codexGroupJID = "120363407895179577@g.us"
 
 var (
-	sessionsMu        sync.Mutex
-	sessionsFile      = filepath.Join(storeDir(), "sessions.json")
-	codexSessionsFile = filepath.Join(storeDir(), "codex_sessions.json")
-	allowedChatsFile  = filepath.Join(storeDir(), "allowed_chats.json")
-	allowedChats      map[string]struct{}
-	allowedChatsMu    sync.RWMutex
+	sessionsMu             sync.Mutex
+	sessionsFile           = filepath.Join(storeDir(), "sessions.json")
+	codexSessionsFile      = filepath.Join(storeDir(), "codex_sessions.json")
+	allowedChatsFile       = filepath.Join(storeDir(), "allowed_chats.json")
+	codexAllowedChatsFile  = filepath.Join(storeDir(), "codex_allowed_chats.json")
+	allowedChats           map[string]struct{}
+	allowedChatsMu         sync.RWMutex
+	codexAllowedChats      map[string]struct{}
+	codexAllowedChatsMu    sync.RWMutex
 )
 
 func loadAllowedChats() map[string]struct{} {
@@ -90,8 +93,21 @@ func loadAllowedChats() map[string]struct{} {
 
 func isAllowedChat(jid string) bool {
 	allowedChatsMu.RLock()
-	defer allowedChatsMu.RUnlock()
 	_, ok := allowedChats[jid]
+	allowedChatsMu.RUnlock()
+	if ok {
+		return true
+	}
+	codexAllowedChatsMu.RLock()
+	_, ok = codexAllowedChats[jid]
+	codexAllowedChatsMu.RUnlock()
+	return ok
+}
+
+func isCodexChat(jid string) bool {
+	codexAllowedChatsMu.RLock()
+	defer codexAllowedChatsMu.RUnlock()
+	_, ok := codexAllowedChats[jid]
 	return ok
 }
 
@@ -121,17 +137,61 @@ func saveAllowedChats() error {
 	return os.WriteFile(allowedChatsFile, data, 0644)
 }
 
+func loadCodexAllowedChats() map[string]struct{} {
+	data, err := os.ReadFile(codexAllowedChatsFile)
+	if err != nil {
+		return map[string]struct{}{codexGroupJID: {}}
+	}
+	var jids []string
+	if err := json.Unmarshal(data, &jids); err != nil || len(jids) == 0 {
+		return map[string]struct{}{codexGroupJID: {}}
+	}
+	m := make(map[string]struct{}, len(jids))
+	for _, j := range jids {
+		m[j] = struct{}{}
+	}
+	return m
+}
+
+func initCodexAllowedChats() {
+	dir := storeDir()
+	os.MkdirAll(dir, 0755)
+	if _, err := os.Stat(codexAllowedChatsFile); os.IsNotExist(err) {
+		data, _ := json.MarshalIndent([]string{codexGroupJID}, "", "  ")
+		os.WriteFile(codexAllowedChatsFile, data, 0644)
+	}
+	codexAllowedChatsMu.Lock()
+	codexAllowedChats = loadCodexAllowedChats()
+	codexAllowedChatsMu.Unlock()
+}
+
+func saveCodexAllowedChats() error {
+	codexAllowedChatsMu.RLock()
+	jids := make([]string, 0, len(codexAllowedChats))
+	for jid := range codexAllowedChats {
+		jids = append(jids, jid)
+	}
+	codexAllowedChatsMu.RUnlock()
+	data, err := json.MarshalIndent(jids, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(codexAllowedChatsFile, data, 0644)
+}
+
 func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFromMe bool) bool {
-	if !strings.HasPrefix(content, "!bridge ") {
+	cmd := strings.TrimSpace(content)
+	switch cmd {
+	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex":
+	default:
 		return false
 	}
 	if !isFromMe {
 		sendWhatsAppMessage(client, chatJID, "⚠️ Only the bridge owner can use bridge commands", "")
 		return true
 	}
-	sub := strings.TrimSpace(strings.TrimPrefix(content, "!bridge "))
-	switch sub {
-	case "add":
+	switch cmd {
+	case "!meet-claude":
 		allowedChatsMu.Lock()
 		allowedChats[chatJID] = struct{}{}
 		allowedChatsMu.Unlock()
@@ -139,8 +199,17 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
 			return true
 		}
-		sendWhatsAppMessage(client, chatJID, "✅ Chat added to bridge whitelist. Messages here will now be routed to Claude/Codex.", "")
-	case "remove":
+		sendWhatsAppMessage(client, chatJID, "👋 Hi! I'm Claude. This chat is now connected to me — send any message to get started.", "")
+	case "!meet-codex":
+		codexAllowedChatsMu.Lock()
+		codexAllowedChats[chatJID] = struct{}{}
+		codexAllowedChatsMu.Unlock()
+		if err := saveCodexAllowedChats(); err != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
+			return true
+		}
+		sendWhatsAppMessage(client, chatJID, "👋 Hi! I'm Codex. This chat is now connected to me — send any message to get started.", "")
+	case "!remove-claude":
 		allowedChatsMu.Lock()
 		delete(allowedChats, chatJID)
 		allowedChatsMu.Unlock()
@@ -148,9 +217,16 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
 			return true
 		}
-		sendWhatsAppMessage(client, chatJID, "✅ Chat removed from bridge whitelist.", "")
-	default:
-		sendWhatsAppMessage(client, chatJID, "Available commands: !bridge add, !bridge remove", "")
+		sendWhatsAppMessage(client, chatJID, "✅ Claude has left this chat.", "")
+	case "!remove-codex":
+		codexAllowedChatsMu.Lock()
+		delete(codexAllowedChats, chatJID)
+		codexAllowedChatsMu.Unlock()
+		if err := saveCodexAllowedChats(); err != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
+			return true
+		}
+		sendWhatsAppMessage(client, chatJID, "✅ Codex has left this chat.", "")
 	}
 	return true
 }
@@ -1189,7 +1265,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			return
 		}
 		addToInputHistory(chatJID, content)
-		if chatJID == codexGroupJID {
+		if isCodexChat(chatJID) {
 			lower := strings.ToLower(content)
 			isCodexStatsQuery := strings.Contains(lower, "tokens") ||
 				strings.Contains(lower, "usage") ||
@@ -1571,9 +1647,10 @@ func main() {
 	logger := waLog.Stdout("Client", "INFO", true)
 	logger.Infof("Starting WhatsApp client...")
 
-	// Load chat whitelist (creates default allowed_chats.json if absent)
+	// Load chat whitelists (creates defaults if absent)
 	initAllowedChats()
-	logger.Infof("Loaded %d allowed chat(s) for Claude handler", len(allowedChats))
+	initCodexAllowedChats()
+	logger.Infof("Loaded %d Claude chat(s), %d Codex chat(s)", len(allowedChats), len(codexAllowedChats))
 
 	// Create database connection for storing session data
 	dbLog := waLog.Stdout("Database", "INFO", true)
