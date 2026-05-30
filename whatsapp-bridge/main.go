@@ -717,11 +717,136 @@ type SendMessageRequest struct {
 	MediaPath string `json:"media_path,omitempty"`
 }
 
+func formatWhatsAppMessage(message string) string {
+	return convertMarkdownTablesToWhatsApp(message)
+}
+
+func convertMarkdownTablesToWhatsApp(message string) string {
+	lines := strings.Split(message, "\n")
+	var out []string
+
+	for i := 0; i < len(lines); {
+		if i+1 < len(lines) && isMarkdownTableHeader(lines[i], lines[i+1]) {
+			header := splitMarkdownTableRow(lines[i])
+			j := i + 2
+			var rows [][]string
+			for j < len(lines) {
+				cells := splitMarkdownTableRow(lines[j])
+				if len(cells) == 0 {
+					break
+				}
+				rows = append(rows, cells)
+				j++
+			}
+
+			if len(rows) == 0 {
+				out = append(out, lines[i])
+				i++
+				continue
+			}
+
+			tableText := renderWhatsAppTable(header, rows)
+			if tableText != "" {
+				out = append(out, tableText)
+			}
+			i = j
+			continue
+		}
+
+		out = append(out, lines[i])
+		i++
+	}
+
+	return strings.Join(out, "\n")
+}
+
+func isMarkdownTableHeader(headerLine, separatorLine string) bool {
+	header := splitMarkdownTableRow(headerLine)
+	separator := splitMarkdownTableRow(separatorLine)
+	if len(header) == 0 || len(header) != len(separator) {
+		return false
+	}
+	for _, cell := range separator {
+		if !isMarkdownTableSeparatorCell(cell) {
+			return false
+		}
+	}
+	return true
+}
+
+func isMarkdownTableSeparatorCell(cell string) bool {
+	cell = strings.TrimSpace(cell)
+	if len(cell) < 3 {
+		return false
+	}
+	cell = strings.Trim(cell, ":")
+	if len(cell) < 3 {
+		return false
+	}
+	for _, r := range cell {
+		if r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func splitMarkdownTableRow(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.Contains(trimmed, "|") {
+		return nil
+	}
+	trimmed = strings.Trim(trimmed, "|")
+	parts := strings.Split(trimmed, "|")
+	cells := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cells = append(cells, strings.TrimSpace(part))
+	}
+	return cells
+}
+
+func renderWhatsAppTable(header []string, rows [][]string) string {
+	var b strings.Builder
+	for rowIndex, row := range rows {
+		if rowIndex > 0 {
+			b.WriteString("\n")
+		}
+
+		title := tableCell(row, 0)
+		if title == "" {
+			title = fmt.Sprintf("Row %d", rowIndex+1)
+		}
+		b.WriteString("*")
+		b.WriteString(title)
+		b.WriteString("*")
+
+		for col := 1; col < len(header); col++ {
+			value := tableCell(row, col)
+			if value == "" {
+				continue
+			}
+			b.WriteString("\n• ")
+			b.WriteString(header[col])
+			b.WriteString(": ")
+			b.WriteString(value)
+		}
+	}
+	return b.String()
+}
+
+func tableCell(row []string, index int) string {
+	if index >= len(row) {
+		return ""
+	}
+	return strings.TrimSpace(row[index])
+}
+
 // Function to send a WhatsApp message
 func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message string, mediaPath string) (bool, string) {
 	if !client.IsConnected() {
 		return false, "Not connected to WhatsApp"
 	}
+	message = formatWhatsAppMessage(message)
 
 	// Create JID for recipient
 	var recipientJID types.JID
