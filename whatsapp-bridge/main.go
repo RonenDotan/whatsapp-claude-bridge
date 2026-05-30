@@ -1650,7 +1650,10 @@ func main() {
 	// Load chat whitelists (creates defaults if absent)
 	initAllowedChats()
 	initCodexAllowedChats()
-	logger.Infof("Loaded %d Claude chat(s), %d Codex chat(s)", len(allowedChats), len(codexAllowedChats))
+	initSignalAllowedChats()
+	initSignalCodexAllowedChats()
+	logger.Infof("Loaded %d Claude chat(s), %d Codex chat(s), %d Signal Claude chat(s), %d Signal Codex chat(s)",
+		len(allowedChats), len(codexAllowedChats), len(signalAllowedChats), len(signalCodexAllowedChats))
 
 	// Create database connection for storing session data
 	dbLog := waLog.Stdout("Database", "INFO", true)
@@ -1769,6 +1772,9 @@ func main() {
 
 	// Start REST API server
 	startRESTServer(client, messageStore, 8080)
+
+	// Start Signal listener (connects to signal-cli daemon on 127.0.0.1:7583)
+	go startSignalListener()
 
 	// Create a channel to keep the main goroutine alive
 	exitChan := make(chan os.Signal, 1)
