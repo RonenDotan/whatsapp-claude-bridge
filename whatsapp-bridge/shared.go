@@ -23,6 +23,24 @@ func storeDir() string {
 	return filepath.Join(filepath.Dir(exe), "store")
 }
 
+func sanitizeChatID(chatID string) string {
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, chatID)
+}
+
+func chatDir(chatID string) string {
+	return filepath.Join(storeDir(), "chats", sanitizeChatID(chatID))
+}
+
+func ensureChatDir(chatID string) (string, error) {
+	dir := chatDir(chatID)
+	return dir, os.MkdirAll(dir, 0755)
+}
+
 const defaultAllowedChat = "120363409956054412@g.us"
 const codexGroupJID = "120363407895179577@g.us"
 
@@ -217,16 +235,25 @@ var (
 
 // transcribeAudio runs whisper on the given audio file and returns the transcript.
 // Cleans up both the input file and the generated .txt after reading.
-func transcribeAudio(filePath string) (string, error) {
+func transcribeAudio(chatID, filePath string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	tmpDir := os.TempDir()
-	cmd := exec.CommandContext(ctx, "whisper", filePath,
+	args := []string{filePath,
 		"--model", "base",
 		"--output_format", "txt",
 		"--output_dir", tmpDir,
-	)
+	}
+	if cfg := getWhisperConfigForChat(chatID); cfg != nil {
+		if cfg.Language != "" {
+			args = append(args, "--language", cfg.Language)
+		}
+		if cfg.InitialPrompt != "" {
+			args = append(args, "--initial_prompt", cfg.InitialPrompt)
+		}
+	}
+	cmd := exec.CommandContext(ctx, "whisper", args...)
 	cmd.Env = append(os.Environ(), "PYTHONUTF8=1")
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -560,18 +587,27 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 	sessionID, hasSession := sessions[chatID]
 	isNewSession := !hasSession || sessionID == ""
 
+	chatDirPath, dirErr := ensureChatDir(chatID)
+	if dirErr != nil {
+		log.Printf("handleWithClaude: failed to create chat dir for %s: %v", chatID, dirErr)
+		chatDirPath = filepath.Dir(storeDir())
+	}
+
 	args := []string{"-p", "--output-format", "json"}
 	if hasSession && sessionID != "" {
 		args = append(args, "--resume", sessionID)
 	}
 	if isNewSession {
-		if prompt := getPersonalityPrompt(chatID); prompt != "" {
-			messageText = prompt + "\n\n" + messageText
+		claudeMdPath := filepath.Join(chatDirPath, "CLAUDE.md")
+		if _, statErr := os.Stat(claudeMdPath); os.IsNotExist(statErr) {
+			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+				_ = os.WriteFile(claudeMdPath, []byte(prompt+"\n"), 0644)
+			}
 		}
 	}
 
 	cmd := exec.Command("claude", args...)
-	cmd.Dir = filepath.Dir(storeDir())
+	cmd.Dir = chatDirPath
 	cmd.Stdin = strings.NewReader(messageText)
 
 	out, err := cmd.Output()
@@ -668,8 +704,14 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 			messageText}
 	}
 
+	chatDirPath, dirErr := ensureChatDir(chatID)
+	if dirErr != nil {
+		log.Printf("handleWithCodex: failed to create chat dir for %s: %v", chatID, dirErr)
+		chatDirPath = filepath.Dir(storeDir())
+	}
+
 	cmd := exec.Command("codex", args...)
-	cmd.Dir = filepath.Dir(storeDir())
+	cmd.Dir = chatDirPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatID, err, string(out))

@@ -783,10 +783,11 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFromMe bool) bool {
 	cmd := strings.TrimSpace(content)
 	isPersonality := strings.HasPrefix(cmd, "!set-personality")
+	isSetIcon := strings.HasPrefix(cmd, "!set-icon")
 	switch cmd {
 	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session":
 	default:
-		if !isPersonality {
+		if !isPersonality && !isSetIcon {
 			return false
 		}
 	}
@@ -803,6 +804,7 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			"!remove-codex — remove this chat from Codex whitelist\n"+
 			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
+			"!set-icon <emoji> — set a custom emoji prefix for all responses\n"+
 			"!stats — show token usage and cost for this session\n"+
 			"!help — show this help screen", "")
 	case "!meet-claude":
@@ -871,6 +873,19 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			sendWhatsAppMessage(client, chatJID, "⚠️ Unknown preset. Available: default, kids, pro, creative", "")
 		}
 	}
+	if isSetIcon {
+		parts := strings.Fields(cmd)
+		if len(parts) < 2 {
+			sendWhatsAppMessage(client, chatJID, "Usage: !set-icon <emoji>", "")
+			return true
+		}
+		emoji := parts[1]
+		if err := setIconForChat(chatJID, emoji); err != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to set icon: "+err.Error(), "")
+			return true
+		}
+		sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Icon set to %s — all responses will start with it.", emoji), "")
+	}
 	return true
 }
 
@@ -937,7 +952,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			sendWhatsAppMessage(client, chatJID, "⚠️ Could not download voice message: "+dlErr.Error(), "")
 			return
 		}
-		transcript, txErr := transcribeAudio(audioPath)
+		transcript, txErr := transcribeAudio(chatJID, audioPath)
 		if txErr != nil {
 			sendWhatsAppMessage(client, chatJID, "⚠️ Could not transcribe voice message: "+txErr.Error(), "")
 			return

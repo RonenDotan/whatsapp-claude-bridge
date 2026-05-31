@@ -82,7 +82,7 @@ var audioExtensions = map[string]bool{
 
 // transcribeSignalVoice finds the first audio attachment, resolves its local path,
 // and returns a Whisper transcript. Returns ("", nil) if none found.
-func transcribeSignalVoice(attachments []signalAttachment) (string, error) {
+func transcribeSignalVoice(chatID string, attachments []signalAttachment) (string, error) {
 	for _, a := range attachments {
 		ct := strings.ToLower(a.ContentType)
 		if !strings.HasPrefix(ct, "audio/") && !a.VoiceNote {
@@ -115,7 +115,7 @@ func transcribeSignalVoice(attachments []signalAttachment) (string, error) {
 			return "", fmt.Errorf("attachment file not found at %s: %w", path, err)
 		}
 		log.Printf("Signal: transcribing voice attachment %s", path)
-		return transcribeAudio(path)
+		return transcribeAudio(chatID, path)
 	}
 	return "", nil
 }
@@ -291,10 +291,11 @@ func initSignalOwnerNumber() {
 func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 	cmd := strings.TrimSpace(content)
 	isPersonality := strings.HasPrefix(cmd, "!set-personality")
+	isSetIcon := strings.HasPrefix(cmd, "!set-icon")
 	switch cmd {
 	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session":
 	default:
-		if !isPersonality {
+		if !isPersonality && !isSetIcon {
 			return false
 		}
 	}
@@ -311,6 +312,7 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			"!remove-codex — remove this chat from Codex whitelist\n"+
 			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
+			"!set-icon <emoji> — set a custom emoji prefix for all responses\n"+
 			"!stats — show token usage and cost for this session\n"+
 			"!help — show this help screen")
 	case "!meet-claude":
@@ -383,6 +385,19 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 		default:
 			sendSignalMessage(chatID, "⚠️ Unknown preset. Available: default, kids, pro, creative")
 		}
+	}
+	if isSetIcon {
+		parts := strings.Fields(cmd)
+		if len(parts) < 2 {
+			sendSignalMessage(chatID, "Usage: !set-icon <emoji>")
+			return true
+		}
+		emoji := parts[1]
+		if err := setIconForChat(chatID, emoji); err != nil {
+			sendSignalMessage(chatID, "⚠️ Failed to set icon: "+err.Error())
+			return true
+		}
+		sendSignalMessage(chatID, fmt.Sprintf("✅ Icon set to %s — all responses will start with it.", emoji))
 	}
 	return true
 }
@@ -476,7 +491,7 @@ func handleSignalMessage(env signalEnvelope) {
 		}
 		content := msg.Message
 		if content == "" && len(msg.Attachments) > 0 {
-			transcript, err := transcribeSignalVoice(msg.Attachments)
+			transcript, err := transcribeSignalVoice(chatID, msg.Attachments)
 			if err != nil {
 				log.Printf("Signal: voice transcription error: %v", err)
 				sendSignalMessage(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
@@ -529,7 +544,7 @@ func handleSignalMessage(env signalEnvelope) {
 	}
 
 	if content == "" && len(env.DataMessage.Attachments) > 0 {
-		transcript, err := transcribeSignalVoice(env.DataMessage.Attachments)
+		transcript, err := transcribeSignalVoice(chatID, env.DataMessage.Attachments)
 		if err != nil {
 			log.Printf("Signal: voice transcription error: %v", err)
 			sendSignalMessage(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
