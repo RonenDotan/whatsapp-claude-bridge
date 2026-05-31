@@ -255,6 +255,7 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			"!remove-codex — remove this chat from Codex whitelist\n"+
 			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
+			"!stats — show token usage and cost for this session\n"+
 			"!help — show this help screen")
 	case "!meet-claude":
 		signalAllowedChatsMu.Lock()
@@ -345,8 +346,7 @@ func dispatchSignalContent(chatID, content string) {
 	addToInputHistory(chatID, content)
 
 	if isSignalCodexChat(chatID) {
-		lower := strings.ToLower(content)
-		if strings.Contains(lower, "tokens") || strings.Contains(lower, "usage") || strings.Contains(lower, "cost") {
+		if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
 			codexStatsMu.Lock()
 			cStats, cOk := codexStatsMap[chatID]
 			codexStatsMu.Unlock()
@@ -362,10 +362,7 @@ func dispatchSignalContent(chatID, content string) {
 			go handleWithCodex(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) })
 		}
 	} else {
-		lower := strings.ToLower(content)
-		if strings.Contains(lower, "cache") || strings.Contains(lower, "cost") ||
-			strings.Contains(lower, "tokens used") || strings.Contains(lower, "usage stats") ||
-			strings.Contains(lower, "how much") || strings.Contains(lower, "spending") {
+		if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
 			usageStatsMu.Lock()
 			stats, ok := usageStatsMap[chatID]
 			usageStatsMu.Unlock()

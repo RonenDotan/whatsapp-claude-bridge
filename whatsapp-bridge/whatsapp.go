@@ -803,6 +803,7 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			"!remove-codex — remove this chat from Codex whitelist\n"+
 			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
+			"!stats — show token usage and cost for this session\n"+
 			"!help — show this help screen", "")
 	case "!meet-claude":
 		allowedChatsMu.Lock()
@@ -952,11 +953,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		addToInputHistory(chatJID, content)
 
 		if isCodexChat(chatJID) {
-			lower := strings.ToLower(content)
-			isCodexStatsQuery := strings.Contains(lower, "tokens") ||
-				strings.Contains(lower, "usage") ||
-				strings.Contains(lower, "cost")
-			if isCodexStatsQuery {
+			if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
 				codexStatsMu.Lock()
 				cStats, cOk := codexStatsMap[chatJID]
 				codexStatsMu.Unlock()
@@ -976,14 +973,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 				})
 			}
 		} else {
-			lower := strings.ToLower(content)
-			isStatsQuery := strings.Contains(lower, "cache") ||
-				strings.Contains(lower, "cost") ||
-				strings.Contains(lower, "tokens used") ||
-				strings.Contains(lower, "usage stats") ||
-				strings.Contains(lower, "how much") ||
-				strings.Contains(lower, "spending")
-			if isStatsQuery {
+			if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
 				usageStatsMu.Lock()
 				stats, ok := usageStatsMap[chatJID]
 				usageStatsMu.Unlock()
