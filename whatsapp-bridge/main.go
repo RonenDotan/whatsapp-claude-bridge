@@ -181,16 +181,28 @@ func saveCodexAllowedChats() error {
 
 func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFromMe bool) bool {
 	cmd := strings.TrimSpace(content)
+	isPersonality := strings.HasPrefix(cmd, "!set-personality")
 	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex":
+	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session":
 	default:
-		return false
+		if !isPersonality {
+			return false
+		}
 	}
 	if !isFromMe {
 		sendWhatsAppMessage(client, chatJID, "⚠️ Only the bridge owner can use bridge commands", "")
 		return true
 	}
 	switch cmd {
+	case "!help":
+		sendWhatsAppMessage(client, chatJID, "Bridge commands:\n"+
+			"!meet-claude — add this chat to Claude whitelist\n"+
+			"!remove-claude — remove this chat from Claude whitelist\n"+
+			"!meet-codex — add this chat to Codex whitelist\n"+
+			"!remove-codex — remove this chat from Codex whitelist\n"+
+			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
+			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
+			"!help — show this help screen", "")
 	case "!meet-claude":
 		allowedChatsMu.Lock()
 		allowedChats[chatJID] = struct{}{}
@@ -227,6 +239,35 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			return true
 		}
 		sendWhatsAppMessage(client, chatJID, "✅ Codex has left this chat.", "")
+	case "!clear-session":
+		sessions := loadSessions()
+		codexSessions := loadCodexSessions()
+		_, hasSession := sessions[chatJID]
+		_, hasCodexSession := codexSessions[chatJID]
+		if !hasSession && !hasCodexSession {
+			sendWhatsAppMessage(client, chatJID, "No active session to clear.", "")
+			return true
+		}
+		handleClearSession(client, chatJID)
+	}
+	if isPersonality {
+		parts := strings.Fields(cmd)
+		if len(parts) < 2 {
+			current := getChatPersonality(chatJID)
+			sendWhatsAppMessage(client, chatJID, fmt.Sprintf("Current personality: %s\nAvailable: default, kids, pro, creative", current), "")
+			return true
+		}
+		preset := parts[1]
+		switch preset {
+		case "default", "kids", "pro", "creative":
+			if err := setChatPersonality(chatJID, preset); err != nil {
+				sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save personality: "+err.Error(), "")
+				return true
+			}
+			sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Personality set to: %s", preset), "")
+		default:
+			sendWhatsAppMessage(client, chatJID, "⚠️ Unknown preset. Available: default, kids, pro, creative", "")
+		}
 	}
 	return true
 }
@@ -445,9 +486,17 @@ func handleWithClaude(client *whatsmeow.Client, chatJID, messageText string) {
 	sessions := loadSessions()
 	sessionID, hasSession := sessions[chatJID]
 
+	isNewSession := !hasSession || sessionID == ""
+
 	args := []string{"-p", "--output-format", "json"}
 	if hasSession && sessionID != "" {
 		args = append(args, "--resume", sessionID)
+	}
+
+	if isNewSession {
+		if prompt := getPersonalityPrompt(chatJID); prompt != "" {
+			messageText = prompt + "\n\n" + messageText
+		}
 	}
 
 	cmd := exec.Command("claude", args...)
@@ -1191,6 +1240,13 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 	// Extract text content
 	content := extractTextContent(msg.Message)
 
+	// Early exit: drop messages from unknown chats unless they look like !meet-* commands
+	if !isAllowedChat(chatJID) {
+		if len(content) < 2 || content[:2] != "!m" {
+			return
+		}
+	}
+
 	// Handle !bridge commands from any chat, before the whitelist check
 	if handleBridgeCommand(client, chatJID, content, msg.Info.IsFromMe) {
 		return
@@ -1256,10 +1312,6 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 
 	// Forward text messages to the appropriate handler (whitelisted chats, skip our own echoes)
 	if content != "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
-		if strings.Contains(strings.ToLower(content), "clear session") {
-			go handleClearSession(client, chatJID)
-			return
-		}
 		if isLooping(chatJID, content) {
 			sendWhatsAppMessage(client, chatJID, "⚠️ You've sent the same message several times. Try rephrasing or type 'clear session' to start fresh.", "")
 			return
@@ -1652,6 +1704,7 @@ func main() {
 	initCodexAllowedChats()
 	initSignalAllowedChats()
 	initSignalCodexAllowedChats()
+	initChatPersonalities()
 	logger.Infof("Loaded %d Claude chat(s), %d Codex chat(s), %d Signal Claude chat(s), %d Signal Codex chat(s)",
 		len(allowedChats), len(codexAllowedChats), len(signalAllowedChats), len(signalCodexAllowedChats))
 

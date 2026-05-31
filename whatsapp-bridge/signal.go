@@ -22,6 +22,7 @@ type signalRPCMessage struct {
 	Params  json.RawMessage `json:"params"`
 	ID      interface{}     `json:"id,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
 }
 
 type signalReceiveParams struct {
@@ -38,16 +39,116 @@ type signalEnvelope struct {
 	SyncMessage json.RawMessage `json:"syncMessage"`
 }
 
+type signalAttachment struct {
+	ContentType string `json:"contentType"`
+	Filename    string `json:"filename"`
+	ID          string `json:"id"`
+	Size        int64  `json:"size"`
+	VoiceNote   bool   `json:"voiceNote"`
+}
+
 type signalDataMessage struct {
-	Timestamp int64            `json:"timestamp"`
-	Message   string           `json:"message"`
-	GroupInfo *signalGroupInfo `json:"groupInfo"`
+	Timestamp   int64               `json:"timestamp"`
+	Message     string              `json:"message"`
+	GroupInfo   *signalGroupInfo    `json:"groupInfo"`
+	Attachments []signalAttachment  `json:"attachments"`
 }
 
 type signalGroupInfo struct {
 	GroupId string `json:"groupId"`
 	Type    string `json:"type"`
 }
+
+type signalSyncMessage struct {
+	SentMessage *signalSyncSentMessage `json:"sentMessage"`
+}
+
+type signalSyncSentMessage struct {
+	Timestamp   int64              `json:"timestamp"`
+	Message     string             `json:"message"`
+	Destination string             `json:"destination"`
+	GroupInfo   *signalGroupInfo   `json:"groupInfo"`
+	Attachments []signalAttachment `json:"attachments"`
+}
+
+// signalAttachmentsDir is where signal-cli daemon auto-saves received attachments.
+var signalAttachmentsDir = func() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "signal-cli", "attachments")
+}()
+
+// transcribeSignalVoice finds the first audio attachment in the list, resolves its
+// local path, and returns a Whisper transcript. Returns ("", nil) if none found.
+func transcribeSignalVoice(attachments []signalAttachment) (string, error) {
+	for _, a := range attachments {
+		ct := strings.ToLower(a.ContentType)
+		if !strings.HasPrefix(ct, "audio/") && !a.VoiceNote {
+			continue
+		}
+
+		// Resolve local path: absolute > relative filename > ID-based lookup.
+		var path string
+		switch {
+		case filepath.IsAbs(a.Filename):
+			path = a.Filename
+		case a.Filename != "":
+			path = filepath.Join(signalAttachmentsDir, a.Filename)
+		case a.ID != "":
+			// signal-cli saves attachments as <id> or <id>.<ext>; try both.
+			base := filepath.Join(signalAttachmentsDir, a.ID)
+			if _, err := os.Stat(base); err == nil {
+				path = base
+			} else {
+				for ext := range audioExtensions {
+					if candidate := base + ext; func() bool { _, e := os.Stat(candidate); return e == nil }() {
+						path = candidate
+						break
+					}
+				}
+			}
+		}
+		if path == "" {
+			log.Printf("Signal: cannot locate attachment id=%s filename=%q — skipping", a.ID, a.Filename)
+			continue
+		}
+		if _, err := os.Stat(path); err != nil {
+			return "", fmt.Errorf("attachment file not found at %s: %w", path, err)
+		}
+		log.Printf("Signal: transcribing voice attachment %s", path)
+		return transcribeAudio(path)
+	}
+	return "", nil
+}
+
+// ─── Last-active chat tracker ─────────────────────────────────────────────────
+
+var (
+	lastSignalActiveChatMu sync.Mutex
+	lastSignalActiveChat   string
+	lastSignalActiveChatTs time.Time
+)
+
+func setLastSignalActiveChat(chatID string) {
+	lastSignalActiveChatMu.Lock()
+	lastSignalActiveChat = chatID
+	lastSignalActiveChatTs = time.Now()
+	lastSignalActiveChatMu.Unlock()
+}
+
+func getLastSignalActiveChat() (string, bool) {
+	lastSignalActiveChatMu.Lock()
+	defer lastSignalActiveChatMu.Unlock()
+	if lastSignalActiveChat == "" || time.Since(lastSignalActiveChatTs) > 10*time.Minute {
+		return "", false
+	}
+	return lastSignalActiveChat, true
+}
+
+// audioExtensions is the set of file extensions treated as voice notes.
+var audioExtensions = map[string]bool{
+	".aac": true, ".mp3": true, ".ogg": true, ".m4a": true, ".opus": true,
+}
+
 
 // ─── Signal whitelist (Claude) ────────────────────────────────────────────────
 
@@ -254,16 +355,28 @@ var signalOwnerNumber = os.Getenv("SIGNAL_OWNER_NUMBER")
 
 func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 	cmd := strings.TrimSpace(content)
+	isPersonality := strings.HasPrefix(cmd, "!set-personality")
 	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex":
+	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session":
 	default:
-		return false
+		if !isPersonality {
+			return false
+		}
 	}
 	if !isFromMe {
 		sendSignalMessage(chatID, "⚠️ Only the bridge owner can use bridge commands")
 		return true
 	}
 	switch cmd {
+	case "!help":
+		sendSignalMessage(chatID, "Bridge commands:\n"+
+			"!meet-claude — add this chat to Claude whitelist\n"+
+			"!remove-claude — remove this chat from Claude whitelist\n"+
+			"!meet-codex — add this chat to Codex whitelist\n"+
+			"!remove-codex — remove this chat from Codex whitelist\n"+
+			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
+			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
+			"!help — show this help screen")
 	case "!meet-claude":
 		signalAllowedChatsMu.Lock()
 		signalAllowedChats[chatID] = struct{}{}
@@ -300,6 +413,40 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			return true
 		}
 		sendSignalMessage(chatID, "✅ Codex has left this chat.")
+	case "!clear-session":
+		sessions := loadSessions()
+		codexSessions := loadCodexSessions()
+		_, hasSession := sessions[chatID]
+		_, hasCodexSession := codexSessions[chatID]
+		if !hasSession && !hasCodexSession {
+			sendSignalMessage(chatID, "No active session to clear.")
+			return true
+		}
+		deleteSession(chatID)
+		deleteCodexSession(chatID)
+		inputHistoryMu.Lock()
+		delete(inputHistory, chatID)
+		inputHistoryMu.Unlock()
+		sendSignalMessage(chatID, "✅ Session cleared for this chat. Next message starts fresh.")
+	}
+	if isPersonality {
+		parts := strings.Fields(cmd)
+		if len(parts) < 2 {
+			current := getChatPersonality(chatID)
+			sendSignalMessage(chatID, fmt.Sprintf("Current personality: %s\nAvailable: default, kids, pro, creative", current))
+			return true
+		}
+		preset := parts[1]
+		switch preset {
+		case "default", "kids", "pro", "creative":
+			if err := setChatPersonality(chatID, preset); err != nil {
+				sendSignalMessage(chatID, "⚠️ Failed to save personality: "+err.Error())
+				return true
+			}
+			sendSignalMessage(chatID, fmt.Sprintf("✅ Personality set to: %s", preset))
+		default:
+			sendSignalMessage(chatID, "⚠️ Unknown preset. Available: default, kids, pro, creative")
+		}
 	}
 	return true
 }
@@ -310,9 +457,17 @@ func handleWithClaudeSignal(chatID, messageText string) {
 	sessions := loadSessions()
 	sessionID, hasSession := sessions[chatID]
 
+	isNewSession := !hasSession || sessionID == ""
+
 	args := []string{"-p", "--output-format", "json"}
 	if hasSession && sessionID != "" {
 		args = append(args, "--resume", sessionID)
+	}
+
+	if isNewSession {
+		if prompt := getPersonalityPrompt(chatID); prompt != "" {
+			messageText = prompt + "\n\n" + messageText
+		}
 	}
 
 	cmd := exec.Command("claude", args...)
@@ -458,61 +613,12 @@ func handleWithCodexSignal(chatID, messageText string) {
 
 // ─── Message router ───────────────────────────────────────────────────────────
 
-func handleSignalMessage(env signalEnvelope) {
-	// Skip sync messages — these are echoes of messages we sent from another device.
-	// json.RawMessage is nil when the field is absent; []byte("null") when JSON null.
-	if len(env.SyncMessage) > 0 && string(env.SyncMessage) != "null" {
-		return
-	}
-
-	// Only process data messages (actual received texts).
-	if env.DataMessage == nil {
-		return
-	}
-
-	content := env.DataMessage.Message
-
-	// Determine chat ID: group ID for group chats, sender phone for 1:1.
-	var chatID string
-	if env.DataMessage.GroupInfo != nil && env.DataMessage.GroupInfo.GroupId != "" {
-		chatID = env.DataMessage.GroupInfo.GroupId
-	} else {
-		chatID = env.Source
-	}
-	if chatID == "" {
-		return
-	}
-
-	// Deduplication by source+timestamp to handle replays after restart.
-	dedupeKey := fmt.Sprintf("%s:%d", env.Source, env.DataMessage.Timestamp)
-	if signalMarkSeen(dedupeKey) {
-		log.Printf("Signal: duplicate message from %s ts=%d, skipping", env.Source, env.DataMessage.Timestamp)
-		return
-	}
-
-	log.Printf("Signal ← %s (chat=%s): %s", env.Source, chatID, content)
-
-	// Bridge commands: only the configured owner phone number counts as "from me".
-	isFromMe := signalOwnerNumber != "" && env.Source == signalOwnerNumber
-	if handleSignalBridgeCommand(chatID, content, isFromMe) {
-		return
-	}
-
+// dispatchSignalContent routes a validated, deduplicated message to Claude or Codex.
+func dispatchSignalContent(chatID, content string) {
 	if content == "" || !isSignalAllowedChat(chatID) {
 		return
 	}
-
-	if strings.Contains(strings.ToLower(content), "clear session") {
-		go func() {
-			deleteSession(chatID)
-			deleteCodexSession(chatID)
-			inputHistoryMu.Lock()
-			delete(inputHistory, chatID)
-			inputHistoryMu.Unlock()
-			sendSignalMessage(chatID, "✅ Session cleared for this chat. Next message starts fresh.")
-		}()
-		return
-	}
+	setLastSignalActiveChat(chatID)
 
 	if isLooping(chatID, content) {
 		sendSignalMessage(chatID, "⚠️ You've sent the same message several times. Try rephrasing or type 'clear session' to start fresh.")
@@ -560,6 +666,116 @@ func handleSignalMessage(env signalEnvelope) {
 			go handleWithClaudeSignal(chatID, content)
 		}
 	}
+}
+
+func handleSignalMessage(env signalEnvelope) {
+	// Sync messages are echoes of messages the account owner sent from another linked
+	// device (e.g. their phone). Handle both bridge commands and regular messages.
+	if len(env.SyncMessage) > 0 && string(env.SyncMessage) != "null" {
+		var sync signalSyncMessage
+		if err := json.Unmarshal(env.SyncMessage, &sync); err != nil {
+			log.Printf("Signal: syncMessage unmarshal error: %v", err)
+			return
+		}
+		if sync.SentMessage == nil {
+			// Bare sync (receipt/keepalive): nothing to do.
+			return
+		}
+		{
+			msg := sync.SentMessage
+			var chatID string
+			if msg.GroupInfo != nil && msg.GroupInfo.GroupId != "" {
+				chatID = msg.GroupInfo.GroupId
+			} else {
+				chatID = msg.Destination
+			}
+			if chatID == "" {
+				log.Printf("Signal: sentMessage has no chatID — skipping")
+				return
+			}
+			// Bridge commands are always owner-authorised in sync messages.
+			if handleSignalBridgeCommand(chatID, msg.Message, true) {
+				return
+			}
+			// Deduplicate before transcription (which is expensive).
+			dedupeKey := fmt.Sprintf("sync:%s:%d", chatID, msg.Timestamp)
+			if signalMarkSeen(dedupeKey) {
+				return
+			}
+			content := msg.Message
+			if content == "" && len(msg.Attachments) > 0 {
+				transcript, err := transcribeSignalVoice(msg.Attachments)
+				if err != nil {
+					log.Printf("Signal: voice transcription error: %v", err)
+					sendSignalMessage(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
+					return
+				}
+				if transcript != "" {
+					content = "[🎤 Voice]: " + transcript
+				}
+			}
+			// sentMessage with empty text and no usable attachments: nothing to dispatch.
+			if content == "" {
+				return
+			}
+			log.Printf("Signal sync← (chat=%s): %s", chatID, content)
+			dispatchSignalContent(chatID, content)
+		}
+		return
+	}
+
+	// Only process data messages (actual received texts from other Signal users).
+	if env.DataMessage == nil {
+		return
+	}
+
+	content := env.DataMessage.Message
+
+	// Determine chat ID: group ID for group chats, sender phone for 1:1.
+	var chatID string
+	if env.DataMessage.GroupInfo != nil && env.DataMessage.GroupInfo.GroupId != "" {
+		chatID = env.DataMessage.GroupInfo.GroupId
+	} else {
+		chatID = env.Source
+	}
+	if chatID == "" {
+		return
+	}
+
+	// Early exit: drop messages from unknown chats unless they look like !meet-* commands
+	if !isSignalAllowedChat(chatID) {
+		if len(content) < 2 || content[:2] != "!m" {
+			return
+		}
+	}
+
+	// Deduplication by source+timestamp to handle replays after restart.
+	dedupeKey := fmt.Sprintf("%s:%d", env.Source, env.DataMessage.Timestamp)
+	if signalMarkSeen(dedupeKey) {
+		return
+	}
+
+	log.Printf("Signal ← %s (chat=%s): %s", env.Source, chatID, content)
+
+	// Bridge commands: only the configured owner phone number counts as "from me".
+	isFromMe := signalOwnerNumber != "" && env.Source == signalOwnerNumber
+	if handleSignalBridgeCommand(chatID, content, isFromMe) {
+		return
+	}
+
+	if content == "" && len(env.DataMessage.Attachments) > 0 {
+		transcript, err := transcribeSignalVoice(env.DataMessage.Attachments)
+		if err != nil {
+			log.Printf("Signal: voice transcription error: %v", err)
+			sendSignalMessage(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
+			return
+		}
+		if transcript != "" {
+			content = "[🎤 Voice]: " + transcript
+		}
+	}
+
+	dispatchSignalContent(chatID, content)
 }
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
@@ -643,8 +859,13 @@ func startSignalListener() {
 					continue
 				}
 				go handleSignalMessage(params.Envelope)
+			} else if msg.Method == "" && msg.ID != nil && msg.ID != float64(0) {
+				// Response to one of our send/version calls — log result or error.
+				if len(msg.Error) > 0 && string(msg.Error) != "null" {
+					log.Printf("Signal: RPC error id=%v: %s", msg.ID, string(msg.Error))
+				}
 			}
-			// Other methods (e.g. version response id=0) are silently ignored.
+			// Heartbeat (id=0) version responses are silently ignored.
 		}
 
 		close(heartbeatStop)
