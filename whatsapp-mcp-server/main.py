@@ -1,3 +1,6 @@
+import sys
+import threading
+import os
 from typing import List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
 from whatsapp import (
@@ -14,6 +17,12 @@ from whatsapp import (
     send_audio_message as whatsapp_audio_voice_message,
     download_media as whatsapp_download_media
 )
+
+def _watch_stdin():
+    sys.stdin.read()  # blocks until stdin closes (MCP client disconnected)
+    os._exit(0)
+
+threading.Thread(target=_watch_stdin, daemon=True).start()
 
 # Initialize FastMCP server
 mcp = FastMCP("whatsapp")
