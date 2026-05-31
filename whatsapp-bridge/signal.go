@@ -228,9 +228,65 @@ func sendSignalMessage(chatID, message string) {
 	conn.SetWriteDeadline(time.Time{})
 }
 
-// ─── Bridge commands ──────────────────────────────────────────────────────────
+// ─── Owner number auto-detection ─────────────────────────────────────────────
 
-var signalOwnerNumber = os.Getenv("SIGNAL_OWNER_NUMBER")
+var signalOwnerNumber string
+
+type signalAccountsFile struct {
+	Accounts []struct {
+		Number string `json:"number"`
+	} `json:"accounts"`
+}
+
+// detectSignalOwnerNumber reads signal-cli's accounts.json and returns the
+// registered phone number, or "" if not found.
+func detectSignalOwnerNumber() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(home, ".local", "share", "signal-cli", "data", "accounts.json"),
+	}
+	if appdata := os.Getenv("APPDATA"); appdata != "" {
+		candidates = append(candidates, filepath.Join(appdata, "signal-cli", "data", "accounts.json"))
+	}
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var af signalAccountsFile
+		if err := json.Unmarshal(data, &af); err != nil {
+			continue
+		}
+		for _, a := range af.Accounts {
+			if strings.HasPrefix(a.Number, "+") {
+				return a.Number
+			}
+		}
+	}
+	return ""
+}
+
+func initSignalOwnerNumber() {
+	n := detectSignalOwnerNumber()
+	if n == "" {
+		n = os.Getenv("SIGNAL_OWNER_NUMBER")
+	}
+	if n == "" {
+		log.Printf("Signal: owner number unknown — bridge commands and isFromMe unavailable until detected")
+		return
+	}
+	signalOwnerNumber = n
+	masked := n
+	if len(n) > 6 {
+		masked = n[:4] + strings.Repeat("*", len(n)-6) + n[len(n)-2:]
+	}
+	log.Printf("Signal: owner number detected: %s", masked)
+}
+
+// ─── Bridge commands ──────────────────────────────────────────────────────────
 
 func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 	cmd := strings.TrimSpace(content)

@@ -16,6 +16,7 @@ func main() {
 		go startWhatsApp()
 	}
 	if settings.SignalEnabled {
+		initSignalOwnerNumber()
 		go startSignalListener()
 	}
 
