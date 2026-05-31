@@ -1,0 +1,23 @@
+# Compiled binaries
+*.exe
+*.exe~
+
+# Logs
+*.log
+*.err
+
+# Runtime store data (sessions, personality state, media)
+store/sessions.json
+store/codex_sessions.json
+store/chat_personalities.json
+store/allowed_chats.json
+store/codex_allowed_chats.json
+store/signal_allowed_chats.json
+store/signal_codex_allowed_chats.json
+store/*.db
+store/*.db-*
+store/[0-9]*@*.us/
+store/chats/
+
+# WhatsApp device key store
+store/whatsapp.db
