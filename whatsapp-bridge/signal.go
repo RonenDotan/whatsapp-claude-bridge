@@ -385,6 +385,13 @@ func dispatchSignalContent(chatID, content string) {
 
 func handleSignalMessage(env signalEnvelope) {
 	if len(env.SyncMessage) > 0 && string(env.SyncMessage) != "null" {
+		// syncMessage is the "sent from another device" mirror — only valid when we are the sender.
+		// When someone else sends in a group, signal-cli emits both a dataMessage (correct, has
+		// downloaded attachments) and a spurious syncMessage; drop the syncMessage in that case.
+		if env.Source != "" && signalOwnerNumber != "" && env.Source != signalOwnerNumber {
+			log.Printf("Signal: syncMessage from non-self source %s, skipping (handled by dataMessage)", env.Source)
+			return
+		}
 		var sync signalSyncMessage
 		if err := json.Unmarshal(env.SyncMessage, &sync); err != nil {
 			log.Printf("Signal: syncMessage unmarshal error: %v", err)
@@ -407,7 +414,7 @@ func handleSignalMessage(env signalEnvelope) {
 		if handleSignalBridgeCommand(chatID, msg.Message, true) {
 			return
 		}
-		dedupeKey := fmt.Sprintf("sync:%s:%d", chatID, msg.Timestamp)
+		dedupeKey := fmt.Sprintf("%s:%d", chatID, msg.Timestamp)
 		if signalMarkSeen(dedupeKey) {
 			return
 		}
@@ -453,7 +460,7 @@ func handleSignalMessage(env signalEnvelope) {
 		}
 	}
 
-	dedupeKey := fmt.Sprintf("%s:%d", env.Source, env.DataMessage.Timestamp)
+	dedupeKey := fmt.Sprintf("%s:%d", chatID, env.DataMessage.Timestamp)
 	if signalMarkSeen(dedupeKey) {
 		return
 	}
