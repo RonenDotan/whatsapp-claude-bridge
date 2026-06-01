@@ -618,6 +618,31 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 		}
 		out, err = runClaude(freshArgs)
 	}
+<<<<<<< Updated upstream
+=======
+
+	runClaude := func(a []string) ([]byte, error) {
+		c := exec.Command("claude", a...)
+		c.Dir = chatDirPath
+		c.Stdin = strings.NewReader(messageText)
+		return c.Output()
+	}
+
+	out, err := runClaude(args)
+	if err != nil && hasSession && sessionID != "" {
+		// Session may be stale (created under a different working dir) — drop and retry fresh.
+		log.Printf("Claude CLI resume failed for %s (session %s), retrying fresh: %v", chatID, sessionID, err)
+		deleteSession(chatID)
+		freshArgs := []string{"-p", "--output-format", "json"}
+		claudeMdPath := filepath.Join(chatDirPath, "CLAUDE.md")
+		if _, statErr := os.Stat(claudeMdPath); os.IsNotExist(statErr) {
+			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+				_ = os.WriteFile(claudeMdPath, []byte(prompt+"\n"), 0644)
+			}
+		}
+		out, err = runClaude(freshArgs)
+	}
+>>>>>>> Stashed changes
 	if err != nil {
 		log.Printf("Claude CLI error for %s: %v", chatID, err)
 		sendFn("⚠️ Claude unreachable: " + err.Error())
@@ -718,6 +743,15 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 	}
 	if abs, err := filepath.Abs(chatDirPath); err == nil {
 		chatDirPath = abs
+	}
+
+	if sessionID == "" {
+		agentsMdPath := filepath.Join(chatDirPath, "AGENTS.md")
+		if _, statErr := os.Stat(agentsMdPath); os.IsNotExist(statErr) {
+			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+				_ = os.WriteFile(agentsMdPath, []byte(prompt+"\n"), 0644)
+			}
+		}
 	}
 
 	if sessionID == "" {
