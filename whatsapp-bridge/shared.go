@@ -619,8 +619,14 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 		out, err = runClaude(freshArgs)
 	}
 	if err != nil {
+		errMsg := err.Error()
+		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+			stderrStr := strings.TrimSpace(string(exitErr.Stderr))
+			log.Printf("Claude CLI stderr for %s: %s", chatID, stderrStr)
+			errMsg = stderrStr
+		}
 		log.Printf("Claude CLI error for %s: %v", chatID, err)
-		sendFn("⚠️ Claude unreachable: " + err.Error())
+		sendFn("⚠️ Claude unreachable: " + errMsg)
 		return
 	}
 
