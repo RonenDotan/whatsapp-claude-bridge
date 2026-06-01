@@ -9,9 +9,9 @@ import (
 )
 
 var personalityPrompts = map[string]string{
-	"kids":     "You are a super fun and playful assistant talking to an 8-year-old boy. Keep every response very short (2 sentences max). Use simple words only. Be enthusiastic and encouraging. No complex explanations.",
-	"pro":      "You are a professional assistant. Be concise and direct. No unnecessary filler words. Get to the point immediately.",
-	"creative": "You are a creative and imaginative assistant. Be expressive, use vivid language, and make responses engaging and story-like when appropriate.",
+	"kids":     "You are a super fun and playful assistant talking to an 8-year-old boy. You MUST keep every response to exactly 2 sentences. No exceptions. Never write more than 2 sentences. Use simple words only. Be enthusiastic and encouraging. No complex explanations.",
+	"pro":      "You are a professional assistant. You MUST be concise and direct. You MUST keep every response to 3 sentences or fewer. No exceptions. No filler words. Get to the point immediately.",
+	"creative": "You are a creative and imaginative assistant. You MUST be expressive and use vivid language. Never give a plain or dry answer. Make every response engaging and story-like when appropriate.",
 }
 
 // WhisperConfig holds per-chat Whisper transcription overrides.
@@ -116,10 +116,16 @@ func writePersonalityContextFile(chatID, preset string) error {
 }
 
 func extractIconLine(content string) string {
-	const prefix = "Always start every response with the emoji "
+	const newPrefix = "You MUST begin EVERY response with the "
+	const oldPrefix = "Always start every response with the emoji "
 	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
-			return strings.TrimSpace(line)
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, newPrefix) {
+			return trimmed
+		}
+		if strings.HasPrefix(trimmed, oldPrefix) {
+			emoji := strings.TrimPrefix(trimmed, oldPrefix)
+			return newPrefix + emoji + " emoji. This is mandatory. Never skip it."
 		}
 	}
 	return ""
@@ -155,20 +161,32 @@ func upsertContextFileLine(filePath, linePrefix, newLine string) error {
 	return os.WriteFile(filePath, []byte(result), 0644)
 }
 
-// setIconForChat writes/updates the icon instruction in both CLAUDE.md and AGENTS.md.
+// setIconForChat writes/updates the icon instruction in the appropriate context file.
 func setIconForChat(chatID, emoji string) error {
 	dir, err := ensureChatDir(chatID)
 	if err != nil {
 		return err
 	}
-	const prefix = "Always start every response with the emoji "
-	line := prefix + emoji
-	for _, filename := range []string{"CLAUDE.md", "AGENTS.md"} {
-		if err := upsertContextFileLine(filepath.Join(dir, filename), prefix, line); err != nil {
-			return err
-		}
+	const newPrefix = "You MUST begin EVERY response with the "
+	const oldPrefix = "Always start every response with the emoji "
+	newLine := newPrefix + emoji + " emoji. This is mandatory. Never skip it."
+	filename := "CLAUDE.md"
+	if isCodexChat(chatID) || isSignalCodexChat(chatID) {
+		filename = "AGENTS.md"
 	}
-	return nil
+	filePath := filepath.Join(dir, filename)
+	// Remove any legacy icon lines before upserting new format.
+	if data, readErr := os.ReadFile(filePath); readErr == nil {
+		lines := strings.Split(string(data), "\n")
+		var filtered []string
+		for _, l := range lines {
+			if !strings.HasPrefix(strings.TrimSpace(l), oldPrefix) {
+				filtered = append(filtered, l)
+			}
+		}
+		_ = os.WriteFile(filePath, []byte(strings.Join(filtered, "\n")), 0644)
+	}
+	return upsertContextFileLine(filePath, newPrefix, newLine)
 }
 
 // saveWhisperPrompt writes or removes whisper_prompt.json in the chat's dir.

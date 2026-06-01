@@ -235,25 +235,16 @@ var (
 
 // transcribeAudio runs whisper on the given audio file and returns the transcript.
 // Cleans up both the input file and the generated .txt after reading.
-func transcribeAudio(chatID, filePath string) (string, error) {
+func transcribeAudio(filePath string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	tmpDir := os.TempDir()
-	args := []string{filePath,
+	cmd := exec.CommandContext(ctx, "whisper", filePath,
 		"--model", "base",
 		"--output_format", "txt",
 		"--output_dir", tmpDir,
-	}
-	if cfg := getWhisperConfigForChat(chatID); cfg != nil {
-		if cfg.Language != "" {
-			args = append(args, "--language", cfg.Language)
-		}
-		if cfg.InitialPrompt != "" {
-			args = append(args, "--initial_prompt", cfg.InitialPrompt)
-		}
-	}
-	cmd := exec.CommandContext(ctx, "whisper", args...)
+	)
 	cmd.Env = append(os.Environ(), "PYTHONUTF8=1")
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -590,7 +581,10 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 	chatDirPath, dirErr := ensureChatDir(chatID)
 	if dirErr != nil {
 		log.Printf("handleWithClaude: failed to create chat dir for %s: %v", chatID, dirErr)
-		chatDirPath = filepath.Dir(storeDir())
+		chatDirPath = storeDir()
+	}
+	if abs, err := filepath.Abs(chatDirPath); err == nil {
+		chatDirPath = abs
 	}
 
 	args := []string{"-p", "--output-format", "json"}
@@ -598,22 +592,41 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 		args = append(args, "--resume", sessionID)
 	}
 	if isNewSession {
+		if prompt := getPersonalityPrompt(chatID); prompt != "" {
+			messageText = prompt + "\n\n" + messageText
+		}
+	}
+
+	runClaude := func(a []string) ([]byte, error) {
+		c := exec.Command("claude", a...)
+		c.Dir = chatDirPath
+		c.Stdin = strings.NewReader(messageText)
+		return c.Output()
+	}
+
+	out, err := runClaude(args)
+	if err != nil && hasSession && sessionID != "" {
+		// Session may be stale (created under a different working dir) — drop and retry fresh.
+		log.Printf("Claude CLI resume failed for %s (session %s), retrying fresh: %v", chatID, sessionID, err)
+		deleteSession(chatID)
+		freshArgs := []string{"-p", "--output-format", "json"}
 		claudeMdPath := filepath.Join(chatDirPath, "CLAUDE.md")
 		if _, statErr := os.Stat(claudeMdPath); os.IsNotExist(statErr) {
 			if prompt := getPersonalityPrompt(chatID); prompt != "" {
 				_ = os.WriteFile(claudeMdPath, []byte(prompt+"\n"), 0644)
 			}
 		}
+		out, err = runClaude(freshArgs)
 	}
-
-	cmd := exec.Command("claude", args...)
-	cmd.Dir = chatDirPath
-	cmd.Stdin = strings.NewReader(messageText)
-
-	out, err := cmd.Output()
 	if err != nil {
+		errMsg := err.Error()
+		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+			stderrStr := strings.TrimSpace(string(exitErr.Stderr))
+			log.Printf("Claude CLI stderr for %s: %s", chatID, stderrStr)
+			errMsg = stderrStr
+		}
 		log.Printf("Claude CLI error for %s: %v", chatID, err)
-		sendFn("⚠️ Claude unreachable: " + err.Error())
+		sendFn("⚠️ Claude unreachable: " + errMsg)
 		return
 	}
 
@@ -677,7 +690,7 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 	}
 	usageStatsMu.Unlock()
 
-	sendFn("🤖🇫🇷\n" + resp.Result)
+	sendFn(resp.Result)
 }
 
 // ─── Codex dispatch ───────────────────────────────────────────────────────────
@@ -707,7 +720,19 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 	chatDirPath, dirErr := ensureChatDir(chatID)
 	if dirErr != nil {
 		log.Printf("handleWithCodex: failed to create chat dir for %s: %v", chatID, dirErr)
-		chatDirPath = filepath.Dir(storeDir())
+		chatDirPath = storeDir()
+	}
+	if abs, err := filepath.Abs(chatDirPath); err == nil {
+		chatDirPath = abs
+	}
+
+	if sessionID == "" {
+		agentsMdPath := filepath.Join(chatDirPath, "AGENTS.md")
+		if _, statErr := os.Stat(agentsMdPath); os.IsNotExist(statErr) {
+			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+				_ = os.WriteFile(agentsMdPath, []byte(prompt+"\n"), 0644)
+			}
+		}
 	}
 
 	cmd := exec.Command("codex", args...)
@@ -755,5 +780,5 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 		replyText = extractCodexReply(rawOutput)
 	}
 
-	sendFn("🤖⚡\n" + replyText)
+	sendFn(replyText)
 }
