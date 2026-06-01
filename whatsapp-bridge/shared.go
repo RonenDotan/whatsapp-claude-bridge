@@ -23,6 +23,24 @@ func storeDir() string {
 	return filepath.Join(filepath.Dir(exe), "store")
 }
 
+func sanitizeChatID(chatID string) string {
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, chatID)
+}
+
+func chatDir(chatID string) string {
+	return filepath.Join(storeDir(), "chats", sanitizeChatID(chatID))
+}
+
+func ensureChatDir(chatID string) (string, error) {
+	dir := chatDir(chatID)
+	return dir, os.MkdirAll(dir, 0755)
+}
+
 const defaultAllowedChat = "120363409956054412@g.us"
 const codexGroupJID = "120363407895179577@g.us"
 
@@ -560,6 +578,15 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 	sessionID, hasSession := sessions[chatID]
 	isNewSession := !hasSession || sessionID == ""
 
+	chatDirPath, dirErr := ensureChatDir(chatID)
+	if dirErr != nil {
+		log.Printf("handleWithClaude: failed to create chat dir for %s: %v", chatID, dirErr)
+		chatDirPath = storeDir()
+	}
+	if abs, err := filepath.Abs(chatDirPath); err == nil {
+		chatDirPath = abs
+	}
+
 	args := []string{"-p", "--output-format", "json"}
 	if hasSession && sessionID != "" {
 		args = append(args, "--resume", sessionID)
@@ -570,11 +597,27 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 		}
 	}
 
-	cmd := exec.Command("claude", args...)
-	cmd.Dir = filepath.Dir(storeDir())
-	cmd.Stdin = strings.NewReader(messageText)
+	runClaude := func(a []string) ([]byte, error) {
+		c := exec.Command("claude", a...)
+		c.Dir = chatDirPath
+		c.Stdin = strings.NewReader(messageText)
+		return c.Output()
+	}
 
-	out, err := cmd.Output()
+	out, err := runClaude(args)
+	if err != nil && hasSession && sessionID != "" {
+		// Session may be stale (created under a different working dir) — drop and retry fresh.
+		log.Printf("Claude CLI resume failed for %s (session %s), retrying fresh: %v", chatID, sessionID, err)
+		deleteSession(chatID)
+		freshArgs := []string{"-p", "--output-format", "json"}
+		claudeMdPath := filepath.Join(chatDirPath, "CLAUDE.md")
+		if _, statErr := os.Stat(claudeMdPath); os.IsNotExist(statErr) {
+			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+				_ = os.WriteFile(claudeMdPath, []byte(prompt+"\n"), 0644)
+			}
+		}
+		out, err = runClaude(freshArgs)
+	}
 	if err != nil {
 		log.Printf("Claude CLI error for %s: %v", chatID, err)
 		sendFn("⚠️ Claude unreachable: " + err.Error())
@@ -641,7 +684,7 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 	}
 	usageStatsMu.Unlock()
 
-	sendFn("🤖🇫🇷\n" + resp.Result)
+	sendFn(resp.Result)
 }
 
 // ─── Codex dispatch ───────────────────────────────────────────────────────────
@@ -668,8 +711,26 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 			messageText}
 	}
 
+	chatDirPath, dirErr := ensureChatDir(chatID)
+	if dirErr != nil {
+		log.Printf("handleWithCodex: failed to create chat dir for %s: %v", chatID, dirErr)
+		chatDirPath = storeDir()
+	}
+	if abs, err := filepath.Abs(chatDirPath); err == nil {
+		chatDirPath = abs
+	}
+
+	if sessionID == "" {
+		agentsMdPath := filepath.Join(chatDirPath, "AGENTS.md")
+		if _, statErr := os.Stat(agentsMdPath); os.IsNotExist(statErr) {
+			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+				_ = os.WriteFile(agentsMdPath, []byte(prompt+"\n"), 0644)
+			}
+		}
+	}
+
 	cmd := exec.Command("codex", args...)
-	cmd.Dir = filepath.Dir(storeDir())
+	cmd.Dir = chatDirPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatID, err, string(out))
@@ -713,5 +774,5 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 		replyText = extractCodexReply(rawOutput)
 	}
 
-	sendFn("🤖⚡\n" + replyText)
+	sendFn(replyText)
 }
