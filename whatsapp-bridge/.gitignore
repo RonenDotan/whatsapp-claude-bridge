@@ -7,6 +7,7 @@
 *.err
 
 # Runtime store data (sessions, personality state, media)
+store/
 store/sessions.json
 store/codex_sessions.json
 store/chat_personalities.json
@@ -21,3 +22,5 @@ store/chats/
 
 # WhatsApp device key store
 store/whatsapp.db
+whatsapp.db
+*.db
