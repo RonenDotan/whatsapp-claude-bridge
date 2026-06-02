@@ -1,3 +1,6 @@
 *.db
+*.log
+*.err
 claude_desktop_config.json
 whatsapp.log
+logs/
