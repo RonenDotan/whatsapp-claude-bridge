@@ -7,8 +7,8 @@
 *.err
 
 # Runtime store data (sessions, personality state, media)
-store/
 store/sessions.json
+store/settings.json
 store/codex_sessions.json
 store/chat_personalities.json
 store/allowed_chats.json

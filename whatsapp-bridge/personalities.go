@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,10 +9,23 @@ import (
 	"sync"
 )
 
+//go:embed store/templates/kids.md
+var kidsTpl string
+
+//go:embed store/templates/pro.md
+var proTpl string
+
+//go:embed store/templates/creative.md
+var creativeTpl string
+
+//go:embed store/templates/default.md
+var defaultTpl string
+
 var personalityPrompts = map[string]string{
-	"kids":     "You are a super fun and playful assistant talking to an 8-year-old boy. You MUST keep every response to exactly 2 sentences. No exceptions. Never write more than 2 sentences. Use simple words only. Be enthusiastic and encouraging. No complex explanations.",
-	"pro":      "You are a professional assistant. You MUST be concise and direct. You MUST keep every response to 3 sentences or fewer. No exceptions. No filler words. Get to the point immediately.",
-	"creative": "You are a creative and imaginative assistant. You MUST be expressive and use vivid language. Never give a plain or dry answer. Make every response engaging and story-like when appropriate.",
+	"kids":     kidsTpl,
+	"pro":      proTpl,
+	"creative": creativeTpl,
+	"default":  defaultTpl,
 }
 
 // WhisperConfig holds per-chat Whisper transcription overrides.
