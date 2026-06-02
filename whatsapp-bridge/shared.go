@@ -128,6 +128,14 @@ func deleteCodexSession(jid string) {
 	os.WriteFile(codexSessionsFile, data, 0644)
 }
 
+func clearSessionData(chatID string) {
+	deleteSession(chatID)
+	deleteCodexSession(chatID)
+	inputHistoryMu.Lock()
+	delete(inputHistory, chatID)
+	inputHistoryMu.Unlock()
+}
+
 // ─── Input history & loop detection ──────────────────────────────────────────
 
 var (
@@ -592,7 +600,7 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 		args = append(args, "--resume", sessionID)
 	}
 	if isNewSession {
-		if prompt := getPersonalityPrompt(chatID); prompt != "" {
+		if prompt := strings.TrimRight(getPersonalityPrompt(chatID), "\n"); prompt != "" {
 			messageText = prompt + "\n\n" + messageText
 		}
 	}
@@ -612,7 +620,7 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 		freshArgs := []string{"-p", "--output-format", "json"}
 		claudeMdPath := filepath.Join(chatDirPath, "CLAUDE.md")
 		if _, statErr := os.Stat(claudeMdPath); os.IsNotExist(statErr) {
-			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+			if prompt := strings.TrimRight(getPersonalityPrompt(chatID), "\n"); prompt != "" {
 				_ = os.WriteFile(claudeMdPath, []byte(prompt+"\n"), 0644)
 			}
 		}
@@ -729,7 +737,7 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 	if sessionID == "" {
 		agentsMdPath := filepath.Join(chatDirPath, "AGENTS.md")
 		if _, statErr := os.Stat(agentsMdPath); os.IsNotExist(statErr) {
-			if prompt := getPersonalityPrompt(chatID); prompt != "" {
+			if prompt := strings.TrimRight(getPersonalityPrompt(chatID), "\n"); prompt != "" {
 				_ = os.WriteFile(agentsMdPath, []byte(prompt+"\n"), 0644)
 			}
 		}

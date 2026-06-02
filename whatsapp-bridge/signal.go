@@ -380,7 +380,8 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 				sendSignalMessage(chatID, "⚠️ Failed to save personality: "+err.Error())
 				return true
 			}
-			sendSignalMessage(chatID, fmt.Sprintf("✅ Personality set to: %s", preset))
+			clearSessionData(chatID)
+			sendSignalMessage(chatID, fmt.Sprintf("✅ Personality set to: %s (session reset — changes take effect now)", preset))
 		default:
 			sendSignalMessage(chatID, "⚠️ Unknown preset. Available: default, kids, pro, creative")
 		}
@@ -396,7 +397,8 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			sendSignalMessage(chatID, "⚠️ Failed to set icon: "+err.Error())
 			return true
 		}
-		sendSignalMessage(chatID, fmt.Sprintf("✅ Icon set to: %s", emoji))
+		clearSessionData(chatID)
+		sendSignalMessage(chatID, fmt.Sprintf("✅ Icon set to: %s (session reset — changes take effect now)", emoji))
 	}
 	return true
 }

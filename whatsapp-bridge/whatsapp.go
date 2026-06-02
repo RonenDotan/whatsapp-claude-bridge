@@ -867,7 +867,8 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 				sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save personality: "+err.Error(), "")
 				return true
 			}
-			sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Personality set to: %s", preset), "")
+			clearSessionData(chatJID)
+			sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Personality set to: %s (session reset — changes take effect now)", preset), "")
 		default:
 			sendWhatsAppMessage(client, chatJID, "⚠️ Unknown preset. Available: default, kids, pro, creative", "")
 		}
@@ -883,7 +884,8 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to set icon: "+err.Error(), "")
 			return true
 		}
-		sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Icon set to: %s", emoji), "")
+		clearSessionData(chatJID)
+		sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Icon set to: %s (session reset — changes take effect now)", emoji), "")
 	}
 	return true
 }
