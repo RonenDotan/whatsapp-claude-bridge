@@ -70,6 +70,23 @@ function Restart-Bridge {
     # Kill-ByCommandLine catches both direct launches and cmd.exe log-wrapper processes
     Kill-ByCommandLine 'whatsapp-bridge.exe'
     Start-Sleep -Milliseconds 500
+
+    # Check for whatsmeow updates before launching
+    try {
+        $latest  = (Invoke-RestMethod 'https://proxy.golang.org/go.mau.fi/whatsmeow/@latest').Version
+        $current = (Select-String -Path "$BRIDGE_DIR\go.mod" -Pattern 'go.mau.fi/whatsmeow').Line.Split(' ')[1]
+        if ($latest -ne $current) {
+            Write-Host "[UPDATE] whatsmeow $current -> $latest, rebuilding..."
+            Push-Location $BRIDGE_DIR
+            & go get go.mau.fi/whatsmeow@latest
+            & go build -o whatsapp-bridge.exe .
+            Pop-Location
+        } else {
+            Write-Host "[OK] whatsmeow $current is current"
+        }
+    } catch {
+        Write-Warning "[WARN] whatsmeow update check failed: $_. Continuing with existing binary."
+    }
     # Start-Process -RedirectStandard* overwrites; use cmd.exe >> for append mode
     $logFile = $BRIDGE_DIR + '\bridge.log'
     $errFile = $BRIDGE_DIR + '\bridge.err'
