@@ -67,8 +67,8 @@ function Restart-WhatsAppMcp {
 
 function Restart-Bridge {
     Write-Host 'Stopping whatsapp-bridge...'
-    Get-Process -Name whatsapp-bridge -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
+    # Kill-ByCommandLine catches both direct launches and cmd.exe log-wrapper processes
+    Kill-ByCommandLine 'whatsapp-bridge.exe'
     Start-Sleep -Milliseconds 500
     # Start-Process -RedirectStandard* overwrites; use cmd.exe >> for append mode
     $logFile = $BRIDGE_DIR + '\bridge.log'
