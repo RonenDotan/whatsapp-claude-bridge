@@ -106,7 +106,7 @@ func writePersonalityContextFile(chatID, preset string) error {
 	if err != nil {
 		return err
 	}
-	prompt := personalityPrompts[preset]
+	prompt := strings.TrimRight(personalityPrompts[preset], "\n")
 	filename := "CLAUDE.md"
 	if isCodexChat(chatID) || isSignalCodexChat(chatID) {
 		filename = "AGENTS.md"
