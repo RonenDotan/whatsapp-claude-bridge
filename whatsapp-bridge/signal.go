@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,10 +71,20 @@ type signalSyncSentMessage struct {
 }
 
 // signalAttachmentsDir is where signal-cli daemon auto-saves received attachments.
-var signalAttachmentsDir = func() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "signal-cli", "attachments")
-}()
+var signalAttachmentsDir string
+
+func init() {
+	switch runtime.GOOS {
+	case "windows":
+		signalAttachmentsDir = filepath.Join(os.Getenv("APPDATA"), "signal-cli", "attachments")
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		signalAttachmentsDir = filepath.Join(home, "Library", "Application Support", "signal-cli", "attachments")
+	default: // linux
+		home, _ := os.UserHomeDir()
+		signalAttachmentsDir = filepath.Join(home, ".local", "share", "signal-cli", "attachments")
+	}
+}
 
 // audioExtensions is the set of file extensions treated as voice notes.
 var audioExtensions = map[string]bool{
@@ -248,6 +259,7 @@ func detectSignalOwnerNumber() string {
 	candidates := []string{
 		filepath.Join(home, ".local", "share", "signal-cli", "data", "accounts.json"),
 	}
+	candidates = append(candidates, filepath.Join(home, "Library", "Application Support", "signal-cli", "data", "accounts.json"))
 	if appdata := os.Getenv("APPDATA"); appdata != "" {
 		candidates = append(candidates, filepath.Join(appdata, "signal-cli", "data", "accounts.json"))
 	}
