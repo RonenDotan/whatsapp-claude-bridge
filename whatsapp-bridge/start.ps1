@@ -1,9 +1,9 @@
 $component = if ($args.Count -gt 0) { $args[0] } else { 'all' }
 
-$BRIDGE_DIR = 'C:\Users\ronen\whatsapp-mcp\whatsapp-bridge'
-$MCP_DIR    = 'C:\Users\ronen\whatsapp-mcp\whatsapp-mcp-server'
+$BRIDGE_DIR = $PSScriptRoot
+$MCP_DIR    = Join-Path $PSScriptRoot '..\whatsapp-mcp-server'
 
-if ($component -eq 'help') {
+if ($component -eq 'help' -or $component -eq '--help') {
     Write-Host 'Usage: start.bat [component]'
     Write-Host ''
     Write-Host '  start.bat             Restart all components'
