@@ -4,6 +4,9 @@ param(
     [switch]$Help
 )
 
+$BRIDGE_DIR = $PSScriptRoot
+$MCP_DIR    = Join-Path $PSScriptRoot '..\whatsapp-mcp-server'
+
 function Show-Usage {
     Write-Host 'Usage: install.ps1 -Channels <whatsapp|signal|both> -LLM <claude|codex|both>'
     Write-Host ''
@@ -201,10 +204,7 @@ if ($LLM -in @('codex', 'both')) {
 
 Write-Host ''
 
-if ($missing.Count -eq 0) {
-    Write-Host 'All prerequisites satisfied. Run install.ps1 again to continue.'
-    exit 0
-} else {
+if ($missing.Count -gt 0) {
     Write-Host 'Prerequisites missing:'
     foreach ($item in $missing) {
         Write-Host "  - $item"
@@ -213,3 +213,118 @@ if ($missing.Count -eq 0) {
     Write-Host 'Install the items above and re-run install.ps1.'
     exit 1
 }
+
+Write-Host '[OK] All prerequisites satisfied.'
+Write-Host ''
+
+# ---------------------------------------------------------------------------
+# Step 2: WhatsApp pairing
+# ---------------------------------------------------------------------------
+
+function Invoke-WhatsAppPairing {
+    $dbPath = Join-Path $BRIDGE_DIR 'store\whatsapp.db'
+    if ((Test-Path $dbPath) -and (Get-Item $dbPath).Length -gt 0) {
+        Write-Host '[OK] WhatsApp already paired -- skipping'
+        return 0
+    }
+
+    Write-Host '[STEP] Starting WhatsApp pairing...'
+
+    $logFile = Join-Path $BRIDGE_DIR 'whatsapp-mcp.log'
+    $errFile = Join-Path $BRIDGE_DIR 'whatsapp-mcp.err'
+
+    # Clear stale logs so we only read fresh output
+    if (Test-Path $logFile) { Remove-Item $logFile -Force }
+    if (Test-Path $errFile) { Remove-Item $errFile -Force }
+
+    $pyExe = Join-Path $MCP_DIR '.venv\Scripts\python.exe'
+    if (-not (Test-Path $pyExe)) { $pyExe = 'python' }
+
+    $proc = $null
+    try {
+        $proc = Start-Process -FilePath $pyExe `
+            -ArgumentList 'main.py' `
+            -WorkingDirectory $MCP_DIR `
+            -RedirectStandardOutput $logFile `
+            -RedirectStandardError  $errFile `
+            -PassThru
+
+        # Wait up to 15 s for QR code output
+        $qrDetected = $false
+        $deadline = (Get-Date).AddSeconds(15)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 1
+            if (Test-Path $logFile) {
+                $content = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+                if ($content -match '[█▀▄]' -or $content -match '(?i)(QR|scan)') {
+                    $qrDetected = $true
+                    break
+                }
+            }
+        }
+
+        if (-not $qrDetected) {
+            Write-Host '[ERROR] QR code not detected within 15 seconds.'
+            Write-Host "        Check $errFile for details."
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+            return 1
+        }
+
+        # Display the QR code
+        Get-Content $logFile
+        Write-Host ''
+        Write-Host 'Scan the QR code above with your WhatsApp app:'
+        Write-Host '   WhatsApp > Linked Devices > Link a Device'
+        Write-Host ''
+
+        # Wait up to 3 minutes for pairing to complete
+        $deadline = (Get-Date).AddSeconds(180)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+
+            # Check log for success indicators
+            $content = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+            if ($content -match '(?i)(Successfully authenticated|Connected|logged in)') {
+                Write-Host '[OK] WhatsApp paired successfully!'
+                return 0
+            }
+
+            # Check for DB file appearing as an alternative success signal
+            if ((Test-Path $dbPath) -and (Get-Item $dbPath).Length -gt 0) {
+                Write-Host '[OK] WhatsApp paired successfully!'
+                return 0
+            }
+        }
+
+        Write-Host '[ERROR] WhatsApp pairing timed out. Check whatsapp-mcp.log for details.'
+        if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+        return 1
+    } catch {
+        Write-Host "[ERROR] Unexpected error during pairing: $_"
+        if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+        return 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Main flow: run pairing steps based on selected channels
+# ---------------------------------------------------------------------------
+
+Write-Host 'Step 2: Pairing channels...'
+Write-Host ''
+
+$pairingOk = $true
+
+if ($Channels -in @('whatsapp', 'both')) {
+    $result = Invoke-WhatsAppPairing
+    if ($result -ne 0) { $pairingOk = $false }
+}
+
+Write-Host ''
+
+if (-not $pairingOk) {
+    Write-Host '[ERROR] Installation did not complete. Fix the errors above and re-run install.ps1.'
+    exit 1
+}
+
+Write-Host '[OK] Installation complete.'
