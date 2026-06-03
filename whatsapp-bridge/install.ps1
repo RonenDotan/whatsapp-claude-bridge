@@ -1,0 +1,215 @@
+param(
+    [string]$Channels = '',
+    [string]$LLM      = '',
+    [switch]$Help
+)
+
+function Show-Usage {
+    Write-Host 'Usage: install.ps1 -Channels <whatsapp|signal|both> -LLM <claude|codex|both>'
+    Write-Host ''
+    Write-Host 'Parameters:'
+    Write-Host '  -Channels   Channels to install: whatsapp, signal, or both'
+    Write-Host '  -LLM        LLM backend to use:  claude, codex, or both'
+    Write-Host '  -Help       Show this help'
+    Write-Host ''
+    Write-Host 'Examples:'
+    Write-Host '  install.ps1 -Channels whatsapp -LLM claude'
+    Write-Host '  install.ps1 -Channels signal   -LLM codex'
+    Write-Host '  install.ps1 -Channels both     -LLM both'
+}
+
+if ($Help) {
+    Show-Usage
+    exit 0
+}
+
+if (-not $Channels -or -not $LLM) {
+    Write-Host 'Error: -Channels and -LLM are required.'
+    Write-Host ''
+    Show-Usage
+    exit 1
+}
+
+$Channels = $Channels.ToLower()
+$LLM      = $LLM.ToLower()
+
+if ($Channels -notin @('whatsapp', 'signal', 'both')) {
+    Write-Host "Error: -Channels must be whatsapp, signal, or both (got: $Channels)"
+    exit 1
+}
+if ($LLM -notin @('claude', 'codex', 'both')) {
+    Write-Host "Error: -LLM must be claude, codex, or both (got: $LLM)"
+    exit 1
+}
+
+Write-Host '================================================'
+Write-Host '  WhatsApp/Signal AI Bridge - Installation Wizard'
+Write-Host '================================================'
+Write-Host ''
+Write-Host "  Channels : $Channels"
+Write-Host "  LLM      : $LLM"
+Write-Host ''
+Write-Host 'Step 1: Checking prerequisites...'
+Write-Host ''
+
+$missing = @()
+
+function Test-VersionAtLeast([string]$actual, [string]$minimum) {
+    try {
+        return ([Version]$actual) -ge ([Version]$minimum)
+    } catch {
+        return $false
+    }
+}
+
+# --- Go (always required) ---
+try {
+    $goOut = (& go version 2>&1) -join ' '
+    if ($goOut -match 'go(\d+\.\d+\.?\d*)') {
+        $goVer = $matches[1]
+        if (Test-VersionAtLeast $goVer '1.21') {
+            Write-Host "[OK]      Go $goVer"
+        } else {
+            Write-Host "[MISSING] Go 1.21+ required (found $goVer) -- download from https://go.dev/dl/"
+            $missing += 'Go 1.21+'
+        }
+    } else {
+        Write-Host '[MISSING] Go 1.21+ required -- download from https://go.dev/dl/'
+        $missing += 'Go 1.21+'
+    }
+} catch {
+    Write-Host '[MISSING] Go 1.21+ required -- download from https://go.dev/dl/'
+    $missing += 'Go 1.21+'
+}
+
+# --- Java (required if signal) ---
+if ($Channels -in @('signal', 'both')) {
+    try {
+        # java -version writes to stderr; capture by joining ErrorRecord strings
+        $javaOut = (& java -version 2>&1) | ForEach-Object { "$_" }
+        $javaStr = $javaOut -join ' '
+        if ($javaStr -match '"(\d+)') {
+            $javaMajor = [int]$matches[1]
+            if ($javaMajor -ge 21) {
+                Write-Host "[OK]      Java $javaMajor"
+            } else {
+                Write-Host "[MISSING] Java 21+ required (found $javaMajor) -- download from https://adoptium.net/"
+                $missing += 'Java 21+'
+            }
+        } else {
+            Write-Host '[MISSING] Java 21+ required -- download from https://adoptium.net/'
+            $missing += 'Java 21+'
+        }
+    } catch {
+        Write-Host '[MISSING] Java 21+ required -- download from https://adoptium.net/'
+        $missing += 'Java 21+'
+    }
+}
+
+# --- Python (required if whatsapp) ---
+if ($Channels -in @('whatsapp', 'both')) {
+    $pyFound = $false
+    foreach ($pyCmd in @('python', 'python3')) {
+        try {
+            $pyOut = (& $pyCmd --version 2>&1) -join ' '
+            if ($pyOut -match 'Python (\d+\.\d+\.?\d*)') {
+                $pyVer = $matches[1]
+                if (Test-VersionAtLeast $pyVer '3.8') {
+                    Write-Host "[OK]      Python $pyVer ($pyCmd)"
+                    $pyFound = $true
+                    break
+                }
+            }
+        } catch {}
+    }
+    if (-not $pyFound) {
+        Write-Host '[MISSING] Python 3.8+ required -- download from https://www.python.org/downloads/'
+        $missing += 'Python 3.8+'
+    }
+}
+
+# --- Node.js (required if LLM includes claude) ---
+if ($LLM -in @('claude', 'both')) {
+    try {
+        $nodeOut = (& node --version 2>&1) -join ' '
+        if ($nodeOut -match 'v(\d+\.\d+\.?\d*)') {
+            $nodeVer = $matches[1]
+            Write-Host "[OK]      Node.js $nodeVer"
+        } else {
+            Write-Host '[MISSING] Node.js required -- download from https://nodejs.org/'
+            $missing += 'Node.js'
+        }
+    } catch {
+        Write-Host '[MISSING] Node.js required -- download from https://nodejs.org/'
+        $missing += 'Node.js'
+    }
+}
+
+# --- signal-cli (required if signal) ---
+if ($Channels -in @('signal', 'both')) {
+    $signalFound = $false
+
+    # First: look for an extracted bundle in TEMP (same approach as start.ps1)
+    $signalBase = Get-ChildItem $env:TEMP -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like 'signal-cli-*-extracted' } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+
+    if ($signalBase) {
+        Write-Host "[OK]      signal-cli (found at $($signalBase.FullName))"
+        $signalFound = $true
+    } else {
+        # Fallback: try PATH
+        try {
+            $null = (& signal-cli --version 2>&1)
+            Write-Host '[OK]      signal-cli (found in PATH)'
+            $signalFound = $true
+        } catch {}
+    }
+
+    if (-not $signalFound) {
+        Write-Host '[MISSING] signal-cli required:'
+        Write-Host '          1. Download from https://github.com/AsamK/signal-cli/releases'
+        Write-Host "          2. Extract to $env:TEMP\signal-cli-<version>-extracted\"
+        $missing += 'signal-cli'
+    }
+}
+
+# --- claude CLI (required if LLM=claude or both) ---
+if ($LLM -in @('claude', 'both')) {
+    try {
+        $claudeOut = (& claude --version 2>&1) | ForEach-Object { "$_" }
+        $claudeStr = ($claudeOut -join ' ').Trim()
+        Write-Host "[OK]      claude CLI ($claudeStr)"
+    } catch {
+        Write-Host '[MISSING] claude CLI required -- install from https://claude.ai/download'
+        $missing += 'claude CLI'
+    }
+}
+
+# --- codex CLI (required if LLM=codex or both) ---
+if ($LLM -in @('codex', 'both')) {
+    try {
+        $codexOut = (& codex --version 2>&1) | ForEach-Object { "$_" }
+        $codexStr = ($codexOut -join ' ').Trim()
+        Write-Host "[OK]      codex CLI ($codexStr)"
+    } catch {
+        Write-Host '[MISSING] codex CLI required -- install via: npm install -g @openai/codex'
+        $missing += 'codex CLI'
+    }
+}
+
+Write-Host ''
+
+if ($missing.Count -eq 0) {
+    Write-Host 'All prerequisites satisfied. Run install.ps1 again to continue.'
+    exit 0
+} else {
+    Write-Host 'Prerequisites missing:'
+    foreach ($item in $missing) {
+        Write-Host "  - $item"
+    }
+    Write-Host ''
+    Write-Host 'Install the items above and re-run install.ps1.'
+    exit 1
+}
