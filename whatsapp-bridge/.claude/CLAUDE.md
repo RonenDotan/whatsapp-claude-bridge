@@ -7,6 +7,8 @@ Launching directly bypasses the kill-before-start logic and creates multiple sim
 bridge instances that conflict with each other, causing messages to stop being processed.
 
 Correct commands:
+- ./start.sh           (Linux/macOS: restart all components)
+- ./start.sh bridge    (Linux/macOS: restart Go bridge only)
 - start.bat            (restart all components)
 - start.bat bridge     (restart Go bridge only)
 - start.bat signal     (restart signal-cli only)
