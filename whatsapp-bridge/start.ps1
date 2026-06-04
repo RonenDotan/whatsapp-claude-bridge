@@ -48,8 +48,8 @@ function Restart-SignalCli {
     Write-Host 'Stopping signal-cli...'
     Kill-ByCommandLine 'signal-cli'
     Start-Sleep -Milliseconds 800
-    $p = Start-Process -FilePath cmd.exe `
-        -ArgumentList ('/c "' + $signalCliBat + '" daemon --tcp 0.0.0.0:7583') `
+    $p = Start-Process -FilePath $signalCliBat `
+        -ArgumentList 'daemon --tcp 0.0.0.0:7583' `
         -WindowStyle Hidden -PassThru
     Write-Host ('[OK] signal-cli started (PID ' + $p.Id + ')')
 }
@@ -60,7 +60,9 @@ function Restart-WhatsAppMcp {
         Where-Object { $_.Name -like 'python*' -and $_.CommandLine -like '*main.py*' } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 800
-    $p = Start-Process -FilePath ($MCP_DIR + '\.venv\Scripts\python.exe') -ArgumentList 'main.py' `
+    $pythonExe = $MCP_DIR + '\.venv\Scripts\python.exe'
+    $p = Start-Process -FilePath $pythonExe `
+        -ArgumentList 'main.py' `
         -WorkingDirectory $MCP_DIR -WindowStyle Hidden -PassThru
     Write-Host ('[OK] whatsapp-mcp-server started (PID ' + $p.Id + ')')
 }
@@ -91,7 +93,7 @@ function Restart-Bridge {
     $logFile = $BRIDGE_DIR + '\bridge.log'
     $errFile = $BRIDGE_DIR + '\bridge.err'
     $p = Start-Process -FilePath cmd.exe `
-        -ArgumentList ('/c "' + $BRIDGE_DIR + '\whatsapp-bridge.exe" >> "' + $logFile + '" 2>> "' + $errFile + '"') `
+        -ArgumentList ('/c ""' + $BRIDGE_DIR + '\whatsapp-bridge.exe" >> "' + $logFile + '" 2>> "' + $errFile + '""') `
         -WorkingDirectory $BRIDGE_DIR -WindowStyle Hidden -PassThru
     Write-Host ('[OK] bridge started (PID ' + $p.Id + ')')
 }
