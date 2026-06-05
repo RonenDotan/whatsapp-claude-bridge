@@ -23,6 +23,36 @@ function Set-BridgeSetting([string]$Key, $Value) {
     $s | ConvertTo-Json -Depth 5 | Set-Content $SETTINGS_FILE -Encoding UTF8
 }
 
+function Find-SignalCli {
+    $base = Get-ChildItem $env:TEMP -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like 'signal-cli-*-extracted' } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($base) {
+        $bat = Get-ChildItem $base.FullName -Recurse -Filter 'signal-cli.bat' -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+        if ($bat) { return $bat }
+    }
+    try { return (Get-Command signal-cli -ErrorAction Stop).Source } catch {}
+    return $null
+}
+
+function Get-SignalAccountsJsonPath {
+    return Join-Path $env:APPDATA 'signal-cli\data\accounts.json'
+}
+
+function Test-SignalLinked {
+    $path = Get-SignalAccountsJsonPath
+    if (-not (Test-Path $path)) { return $false }
+    try {
+        $content = Get-Content $path -Raw | ConvertFrom-Json
+        foreach ($acct in $content.accounts) {
+            if ($acct.number -match '^\+') { return $true }
+        }
+    } catch {}
+    return $false
+}
+
 function Show-Usage {
     Write-Host 'Usage: install.ps1 -Channels <whatsapp|signal|both> -LLM <claude|codex|both>'
     Write-Host ''
@@ -166,27 +196,10 @@ if ($LLM -in @('claude', 'both')) {
 
 # --- signal-cli (required if signal) ---
 if ($Channels -in @('signal', 'both')) {
-    $signalFound = $false
-
-    # First: look for an extracted bundle in TEMP (same approach as start.ps1)
-    $signalBase = Get-ChildItem $env:TEMP -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like 'signal-cli-*-extracted' } |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
-
-    if ($signalBase) {
-        Write-Host "[OK]      signal-cli (found at $($signalBase.FullName))"
-        $signalFound = $true
+    $signalPath = Find-SignalCli
+    if ($signalPath) {
+        Write-Host "[OK]      signal-cli (found at $signalPath)"
     } else {
-        # Fallback: try PATH
-        try {
-            $null = (& signal-cli --version 2>&1)
-            Write-Host '[OK]      signal-cli (found in PATH)'
-            $signalFound = $true
-        } catch {}
-    }
-
-    if (-not $signalFound) {
         Write-Host '[MISSING] signal-cli required:'
         Write-Host '          1. Download from https://github.com/AsamK/signal-cli/releases'
         Write-Host "          2. Extract to $env:TEMP\signal-cli-<version>-extracted\"
@@ -322,6 +335,76 @@ function Invoke-WhatsAppPairing {
     }
 }
 
+function Stop-SignalCli([System.Diagnostics.Process]$proc) {
+    if ($proc -and -not $proc.HasExited) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    }
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*signal-cli*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Invoke-SignalLinking {
+    if (Test-SignalLinked) {
+        Write-Host '[OK] Signal already linked -- skipping'
+        return 0
+    }
+
+    $signalBat = Find-SignalCli
+    if (-not $signalBat) {
+        Write-Host '[ERROR] signal-cli not found. Check prerequisites.'
+        return 1
+    }
+
+    Write-Host '[STEP] Starting Signal linking...'
+    Write-Host ''
+    Write-Host '  A new window will open showing a QR code.'
+    Write-Host '  This may take up to a minute — the QR code will appear in the new window.'
+    Write-Host '  On your phone: Signal > Settings > Linked Devices > Link New Device'
+    Write-Host '  Scan the QR code in the new window.'
+    Write-Host ''
+    Write-Host '  Waiting for you to scan (up to 5 minutes)...'
+    Write-Host ''
+
+    # Use outer "" to avoid cmd.exe quote-stripping (same pattern as Restart-Bridge in start.ps1)
+    $proc = Start-Process -FilePath 'cmd.exe' `
+        -ArgumentList ('/c ""' + $signalBat + '" link --name ""AI-Bridge"""') `
+        -WindowStyle Normal -PassThru
+
+    if (-not $proc) {
+        Write-Host '[ERROR] Failed to start signal-cli.'
+        return 1
+    }
+
+    $deadline  = (Get-Date).AddSeconds(300)
+    $startTime = Get-Date
+    $linked    = $false
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        if (Test-SignalLinked) { $linked = $true; break }
+        if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+            Write-Host ('[ERROR] signal-cli exited with code ' + $proc.ExitCode)
+            Stop-SignalCli $proc
+            return 1
+        }
+        $elapsed = [int]((Get-Date) - $startTime).TotalSeconds
+        if ($elapsed % 30 -eq 0 -and $elapsed -gt 0) {
+            Write-Host ("  Still waiting... ($elapsed" + 's elapsed, up to 300s)')
+        }
+    }
+
+    Stop-SignalCli $proc
+
+    if ($linked) {
+        Write-Host '[OK] Signal linked successfully!'
+        return 0
+    } else {
+        Write-Host '[ERROR] Signal linking timed out after 5 minutes.'
+        Write-Host '        Re-run install.ps1 to try again.'
+        return 1
+    }
+}
+
 function Invoke-LLMConfiguration {
     if ($LLM -in @('claude', 'both')) {
         Write-Host '[STEP] Configuring Claude...'
@@ -374,6 +457,11 @@ $pairingOk = $true
 
 if ($Channels -in @('whatsapp', 'both')) {
     $result = Invoke-WhatsAppPairing
+    if ($result -ne 0) { $pairingOk = $false }
+}
+
+if ($Channels -in @('signal', 'both')) {
+    $result = Invoke-SignalLinking
     if ($result -ne 0) { $pairingOk = $false }
 }
 
