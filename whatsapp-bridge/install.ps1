@@ -6,6 +6,22 @@ param(
 
 $BRIDGE_DIR = $PSScriptRoot
 $MCP_DIR    = Join-Path $PSScriptRoot '..\whatsapp-mcp-server'
+$STORE_DIR           = Join-Path $BRIDGE_DIR 'store'
+$SETTINGS_FILE       = Join-Path $STORE_DIR  'settings.json'
+
+function Get-BridgeSettings {
+    if (Test-Path $SETTINGS_FILE) {
+        try { return (Get-Content $SETTINGS_FILE -Raw | ConvertFrom-Json) } catch {}
+    }
+    return [PSCustomObject]@{}
+}
+
+function Set-BridgeSetting([string]$Key, $Value) {
+    $s = Get-BridgeSettings
+    $s | Add-Member -NotePropertyName $Key -NotePropertyValue $Value -Force
+    if (-not (Test-Path $STORE_DIR)) { New-Item -ItemType Directory -Path $STORE_DIR -Force | Out-Null }
+    $s | ConvertTo-Json -Depth 5 | Set-Content $SETTINGS_FILE -Encoding UTF8
+}
 
 function Show-Usage {
     Write-Host 'Usage: install.ps1 -Channels <whatsapp|signal|both> -LLM <claude|codex|both>'
@@ -306,6 +322,47 @@ function Invoke-WhatsAppPairing {
     }
 }
 
+function Invoke-LLMConfiguration {
+    if ($LLM -in @('claude', 'both')) {
+        Write-Host '[STEP] Configuring Claude...'
+        try {
+            $out = (& claude --version 2>&1) -join ' '
+            Write-Host "[OK]  claude CLI: $out"
+        } catch {
+            Write-Host "[WARN] Cannot run claude CLI: $_"
+            Write-Host '       Ensure claude is installed and on PATH.'
+        }
+        Set-BridgeSetting 'claude_enabled' $true
+    }
+
+    if ($LLM -in @('codex', 'both')) {
+        Write-Host '[STEP] Configuring Codex...'
+        $apiKey = $env:OPENAI_API_KEY
+        if (-not $apiKey) {
+            $saved = Get-BridgeSettings
+            if ($saved.PSObject.Properties['openai_api_key']) { $apiKey = $saved.openai_api_key }
+        }
+        if ($apiKey) {
+            Write-Host ("[OK]  OpenAI API key already set (" + $apiKey.Substring(0, [Math]::Min(7, $apiKey.Length)) + "...)")
+        } else {
+            do {
+                $apiKey = Read-Host 'Enter your OpenAI API key (starts with sk-)'
+                if (-not $apiKey -or -not $apiKey.StartsWith('sk-')) { Write-Host '[WARN] Key must start with "sk-". Try again.' }
+            } while (-not $apiKey -or -not $apiKey.StartsWith('sk-'))
+            SETX OPENAI_API_KEY $apiKey | Out-Null
+            $env:OPENAI_API_KEY = $apiKey
+            Write-Host '[OK]  OPENAI_API_KEY saved to user environment'
+            Set-BridgeSetting 'openai_api_key' $apiKey
+        }
+        Set-BridgeSetting 'codex_enabled' $true
+    }
+
+    $default = if ($LLM -eq 'both') { 'claude' } else { $LLM }
+    Set-BridgeSetting 'default_llm' $default
+    Write-Host "[OK]  Default LLM set to: $default"
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Main flow: run pairing steps based on selected channels
 # ---------------------------------------------------------------------------
@@ -321,10 +378,15 @@ if ($Channels -in @('whatsapp', 'both')) {
 }
 
 Write-Host ''
+Write-Host 'Step 3: Configuring LLM backend...'
+Write-Host ''
+$result = Invoke-LLMConfiguration
+if ($result -ne 0) { $pairingOk = $false }
+Write-Host ''
 
 if (-not $pairingOk) {
     Write-Host '[ERROR] Installation did not complete. Fix the errors above and re-run install.ps1.'
     exit 1
 }
 
-Write-Host '[OK] Installation complete.'
+Write-Host '[OK] LLM configuration complete.'
