@@ -72,15 +72,42 @@ if ($Help) {
     exit 0
 }
 
-if (-not $Channels -or -not $LLM) {
-    Write-Host 'Error: -Channels and -LLM are required.'
-    Write-Host ''
-    Show-Usage
-    exit 1
-}
-
 $Channels = $Channels.ToLower()
 $LLM      = $LLM.ToLower()
+
+if (-not $Channels) {
+    do {
+        Write-Host 'Which channels do you want to configure?'
+        Write-Host '  [1] WhatsApp only'
+        Write-Host '  [2] Signal only'
+        Write-Host '  [3] Both WhatsApp and Signal'
+        $choice = Read-Host 'Enter choice (1/2/3)'
+        switch ($choice) {
+            '1' { $Channels = 'whatsapp' }
+            '2' { $Channels = 'signal' }
+            '3' { $Channels = 'both' }
+            default { Write-Host '[WARN] Invalid choice. Enter 1, 2, or 3.' }
+        }
+    } while (-not $Channels)
+    Write-Host ''
+}
+
+if (-not $LLM) {
+    do {
+        Write-Host 'Which LLM backend do you want to use?'
+        Write-Host '  [1] Claude'
+        Write-Host '  [2] Codex (OpenAI)'
+        Write-Host '  [3] Both'
+        $choice = Read-Host 'Enter choice (1/2/3)'
+        switch ($choice) {
+            '1' { $LLM = 'claude' }
+            '2' { $LLM = 'codex' }
+            '3' { $LLM = 'both' }
+            default { Write-Host '[WARN] Invalid choice. Enter 1, 2, or 3.' }
+        }
+    } while (-not $LLM)
+    Write-Host ''
+}
 
 if ($Channels -notin @('whatsapp', 'signal', 'both')) {
     Write-Host "Error: -Channels must be whatsapp, signal, or both (got: $Channels)"
@@ -95,8 +122,7 @@ Write-Host '================================================'
 Write-Host '  WhatsApp/Signal AI Bridge - Installation Wizard'
 Write-Host '================================================'
 Write-Host ''
-Write-Host "  Channels : $Channels"
-Write-Host "  LLM      : $LLM"
+Write-Host "  Installing with: Channels=$Channels, LLM=$LLM"
 Write-Host ''
 Write-Host 'Step 1: Checking prerequisites...'
 Write-Host ''
