@@ -963,6 +963,41 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		content = "[🎤 Voice]: " + transcript
 	}
 
+	// ── Non-audio attachment pipeline ──────────────────────────────────────────
+	if mediaType != "" && mediaType != "audio" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
+		ch := NewWhatsAppChannel(client, messageStore)
+		var llm LLM
+		if isCodexChat(chatJID) {
+			llm = NewCodexLLM()
+		} else {
+			llm = NewClaudeLLM()
+		}
+		inMsg := IncomingMessage{
+			ChatID:    chatJID,
+			SenderID:  sender,
+			Text:      content,
+			IsFromMe:  msg.Info.IsFromMe,
+			MessageID: msg.Info.ID,
+		}
+		att, attErr := ch.ReceiveAttachment(inMsg)
+		if attErr != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Could not download attachment: "+attErr.Error(), "")
+			return
+		}
+		if att != nil {
+			go func() {
+				reply, procErr := llm.ProcessWithAttachment(chatJID, content, att)
+				if procErr != nil {
+					sendWhatsAppMessage(client, chatJID, "⚠️ Could not process attachment: "+procErr.Error(), "")
+					return
+				}
+				sendWhatsAppMessage(client, chatJID, reply, "")
+			}()
+			return
+		}
+		// att == nil: unsupported media type — fall through to text path
+	}
+
 	if content != "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
 		if isLooping(chatJID, content) {
 			sendWhatsAppMessage(client, chatJID, "⚠️ You've sent the same message several times. Try rephrasing or type 'clear session' to start fresh.", "")

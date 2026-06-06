@@ -570,6 +570,40 @@ func handleSignalMessage(env signalEnvelope) {
 		}
 	}
 
+	// ── Non-audio attachment pipeline ─────────────────────────────────────────
+	if content == "" && len(env.DataMessage.Attachments) > 0 && isSignalAllowedChat(chatID) && !isFromMe {
+		ch := NewSignalChannel()
+		var llm LLM
+		if isSignalCodexChat(chatID) {
+			llm = NewCodexLLM()
+		} else {
+			llm = NewClaudeLLM()
+		}
+		inMsg := IncomingMessage{
+			ChatID:   chatID,
+			SenderID: env.Source,
+			Text:     "",
+			IsFromMe: isFromMe,
+			RawData:  env.DataMessage.Attachments,
+		}
+		att, attErr := ch.ReceiveAttachment(inMsg)
+		if attErr != nil {
+			sendSignalMessage(chatID, "⚠️ Could not process attachment: "+attErr.Error())
+			return
+		}
+		if att != nil {
+			go func() {
+				reply, procErr := llm.ProcessWithAttachment(chatID, "", att)
+				if procErr != nil {
+					sendSignalMessage(chatID, "⚠️ Could not process attachment: "+procErr.Error())
+					return
+				}
+				sendSignalMessage(chatID, reply)
+			}()
+			return
+		}
+	}
+
 	dispatchSignalContent(chatID, content)
 }
 
