@@ -11,6 +11,10 @@ type IncomingMessage struct {
 	Text      string // plain text body (may be empty if attachment-only)
 	IsFromMe  bool   // true when the bridge itself sent this message
 	MessageID string // channel-specific unique message ID (used for media lookup on WhatsApp)
+	// RawData carries platform-specific attachment metadata that cannot be
+	// expressed in the normalised fields above.
+	// Signal: []signalAttachment  —  WhatsApp: not used (media info is in SQLite)
+	RawData interface{}
 }
 
 // Attachment represents a file received via any channel. The file is always
