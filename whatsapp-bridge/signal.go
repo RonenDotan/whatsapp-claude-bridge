@@ -334,7 +334,6 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
 			return true
 		}
-		ensureChatClaudeSettings(chatID)
 		sendSignalMessage(chatID, "👋 Hi! I'm Claude. This chat is now connected to me — send any message to get started.")
 	case "!meet-codex":
 		signalCodexAllowedChatsMu.Lock()
@@ -344,7 +343,6 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
 			return true
 		}
-		ensureChatClaudeSettings(chatID)
 		sendSignalMessage(chatID, "👋 Hi! I'm Codex. This chat is now connected to me — send any message to get started.")
 	case "!remove-claude":
 		signalAllowedChatsMu.Lock()

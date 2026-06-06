@@ -814,7 +814,6 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
 			return true
 		}
-		ensureChatClaudeSettings(chatJID)
 		sendWhatsAppMessage(client, chatJID, "👋 Hi! I'm Claude. This chat is now connected to me — send any message to get started.", "")
 	case "!meet-codex":
 		codexAllowedChatsMu.Lock()
@@ -824,7 +823,6 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
 			return true
 		}
-		ensureChatClaudeSettings(chatJID)
 		sendWhatsAppMessage(client, chatJID, "👋 Hi! I'm Codex. This chat is now connected to me — send any message to get started.", "")
 	case "!remove-claude":
 		allowedChatsMu.Lock()

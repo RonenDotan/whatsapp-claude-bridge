@@ -41,40 +41,6 @@ func ensureChatDir(chatID string) (string, error) {
 	return dir, os.MkdirAll(dir, 0755)
 }
 
-// bridgeDir returns the directory containing the bridge executable.
-func bridgeDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return "."
-	}
-	return filepath.Dir(exe)
-}
-
-// ensureChatClaudeSettings copies the per-session settings template into
-// <chatDir>/.claude/settings.local.json if it does not already exist.
-// This allows Claude Code to pick up per-chat settings rather than the
-// bridge-root .claude/settings.local.json.
-func ensureChatClaudeSettings(chatID string) {
-	claudeSubdir := filepath.Join(chatDir(chatID), ".claude")
-	if err := os.MkdirAll(claudeSubdir, 0755); err != nil {
-		log.Printf("ensureChatClaudeSettings: failed to create .claude dir for %s: %v", chatID, err)
-		return
-	}
-	target := filepath.Join(claudeSubdir, "settings.local.json")
-	if _, err := os.Stat(target); err == nil {
-		return // already exists — don't overwrite custom settings
-	}
-	tmpl := filepath.Join(bridgeDir(), ".claude", "templates", "settings.local.json")
-	data, err := os.ReadFile(tmpl)
-	if err != nil {
-		log.Printf("ensureChatClaudeSettings: template not found at %s: %v", tmpl, err)
-		return
-	}
-	if err := os.WriteFile(target, data, 0644); err != nil {
-		log.Printf("ensureChatClaudeSettings: failed to write %s: %v", target, err)
-	}
-}
-
 const defaultAllowedChat = "120363409956054412@g.us"
 const codexGroupJID = "120363407895179577@g.us"
 
