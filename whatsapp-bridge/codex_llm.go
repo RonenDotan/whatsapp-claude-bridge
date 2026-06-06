@@ -1,11 +1,17 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
 
 // CodexLLM implements LLM using the Codex CLI (`codex exec …`).
-// Vision / attachment support depends on what the Codex CLI exposes —
-// ProcessWithAttachment will return an unsupported error until that is
-// researched and confirmed.
+// Session state is stored in codex_sessions.json alongside Claude's sessions.json.
 type CodexLLM struct{}
 
 // NewCodexLLM constructs a CodexLLM.
@@ -14,20 +20,130 @@ func NewCodexLLM() *CodexLLM { return &CodexLLM{} }
 // ID returns "codex".
 func (l *CodexLLM) ID() string { return "codex" }
 
-// Process sends a plain-text message to Codex and returns the reply.
-//
-// TODO: implement — migrate logic from handleWithCodex() in shared.go
+// Process delegates to handleWithCodex and captures the reply as a return value.
 func (l *CodexLLM) Process(chatID, text string) (string, error) {
-	return "", nil
+	var result string
+	var callErr error
+	handleWithCodex(chatID, text, func(reply string) {
+		if strings.HasPrefix(reply, "⚠️") {
+			callErr = fmt.Errorf("%s", reply)
+		} else {
+			result = reply
+		}
+	})
+	return result, callErr
 }
 
-// ProcessWithAttachment is not yet implemented for Codex.
-// Returns an error so callers can fall back gracefully (e.g. send the
-// attachment to Claude instead, or notify the user).
-//
-// TODO: research Codex CLI image/file flags, then implement.
+// ProcessWithAttachment sends a message together with an image file to Codex.
+// Codex CLI supports PNG, JPEG, GIF, and WebP via the --image flag.
+// Non-image MIME types return a graceful error.
 func (l *CodexLLM) ProcessWithAttachment(chatID, text string, att *Attachment) (string, error) {
-	return "", fmt.Errorf("codex: attachment processing not yet supported (mime=%s)", att.MimeType)
+	// Codex supports image/* types only.
+	if !strings.HasPrefix(att.MimeType, "image/") {
+		return "", fmt.Errorf("codex: attachment type %q not yet supported", att.MimeType)
+	}
+
+	sessions := loadCodexSessions()
+	sessionID := sessions[chatID]
+
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("codex_reply_%d.txt", time.Now().UnixNano()))
+	defer os.Remove(tmpFile)
+
+	messageText := text
+	if messageText == "" {
+		messageText = "What is in this image?"
+	}
+
+	var args []string
+	if sessionID != "" {
+		// Resume an existing session. --image attaches to the new turn.
+		args = []string{
+			"exec", "--json", "--output-last-message", tmpFile,
+			"--image", att.LocalPath,
+			"resume", sessionID,
+			messageText,
+		}
+	} else {
+		args = []string{
+			"exec", "--json", "--output-last-message", tmpFile,
+			"--skip-git-repo-check",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"-s", "workspace-write",
+			"--image", att.LocalPath,
+			messageText,
+		}
+	}
+
+	chatDirPath, dirErr := ensureChatDir(chatID)
+	if dirErr != nil {
+		log.Printf("CodexLLM.ProcessWithAttachment: failed to create chat dir for %s: %v", chatID, dirErr)
+		chatDirPath = storeDir()
+	}
+	if abs, err := filepath.Abs(chatDirPath); err == nil {
+		chatDirPath = abs
+	}
+
+	// Write personality prompt to AGENTS.md on first session.
+	if sessionID == "" {
+		agentsMdPath := filepath.Join(chatDirPath, "AGENTS.md")
+		if _, statErr := os.Stat(agentsMdPath); os.IsNotExist(statErr) {
+			if prompt := strings.TrimRight(getPersonalityPrompt(chatID), "\n"); prompt != "" {
+				_ = os.WriteFile(agentsMdPath, []byte(prompt+"\n"), 0644)
+			}
+		}
+	}
+
+	cmd := exec.Command("codex", args...)
+	cmd.Dir = chatDirPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("CodexLLM.ProcessWithAttachment: exec error for %s: %v\nOutput: %s", chatID, err, string(out))
+
+		// Stale session — retry fresh (without resume).
+		if sessionID != "" {
+			deleteCodexSession(chatID)
+			return l.ProcessWithAttachment(chatID, text, att)
+		}
+
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed != "" {
+			exitCode := -1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			return "", fmt.Errorf("codex (exit %d): %s", exitCode, trimmed)
+		}
+		return "", fmt.Errorf("codex: %w", err)
+	}
+
+	rawOutput := string(out)
+	newID, inputTokens, outputTokens := parseCodexJSONL(rawOutput)
+
+	if newID != "" {
+		saveCodexSession(chatID, newID)
+	} else if textID := parseCodexSessionID(rawOutput); textID != "" {
+		saveCodexSession(chatID, textID)
+	}
+
+	if inputTokens > 0 || outputTokens > 0 {
+		codexStatsMu.Lock()
+		codexStatsMap[chatID] = CodexStats{
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+			TotalTokens:  inputTokens + outputTokens,
+			LastUpdated:  time.Now().Format("2006-01-02 15:04:05"),
+		}
+		codexStatsMu.Unlock()
+	}
+
+	var replyText string
+	if data, err := os.ReadFile(tmpFile); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		replyText = strings.TrimSpace(string(data))
+	} else {
+		replyText = extractCodexReply(rawOutput)
+	}
+
+	return replyText, nil
 }
 
 // compile-time interface check
