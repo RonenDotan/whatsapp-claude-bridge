@@ -38,6 +38,10 @@ func (l *CodexLLM) Process(chatID, text string) (string, error) {
 // Codex CLI supports PNG, JPEG, GIF, and WebP via the --image flag.
 // Non-image MIME types return a graceful error.
 func (l *CodexLLM) ProcessWithAttachment(chatID, text string, att *Attachment) (string, error) {
+	return l.processWithAttachment(chatID, text, att, false)
+}
+
+func (l *CodexLLM) processWithAttachment(chatID, text string, att *Attachment, retried bool) (string, error) {
 	// Codex supports image/* types only.
 	if !strings.HasPrefix(att.MimeType, "image/") {
 		return "", fmt.Errorf("codex: attachment type %q not yet supported", att.MimeType)
@@ -54,14 +58,13 @@ func (l *CodexLLM) ProcessWithAttachment(chatID, text string, att *Attachment) (
 		messageText = "What is in this image?"
 	}
 
+	// When --image is used, codex reads the prompt from stdin (not positional arg).
 	var args []string
 	if sessionID != "" {
-		// Resume an existing session. --image attaches to the new turn.
 		args = []string{
 			"exec", "--json", "--output-last-message", tmpFile,
 			"--image", att.LocalPath,
 			"resume", sessionID,
-			messageText,
 		}
 	} else {
 		args = []string{
@@ -70,7 +73,6 @@ func (l *CodexLLM) ProcessWithAttachment(chatID, text string, att *Attachment) (
 			"--dangerously-bypass-approvals-and-sandbox",
 			"-s", "workspace-write",
 			"--image", att.LocalPath,
-			messageText,
 		}
 	}
 
@@ -95,14 +97,15 @@ func (l *CodexLLM) ProcessWithAttachment(chatID, text string, att *Attachment) (
 
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = chatDirPath
+	cmd.Stdin = strings.NewReader(messageText)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("CodexLLM.ProcessWithAttachment: exec error for %s: %v\nOutput: %s", chatID, err, string(out))
 
-		// Stale session — retry fresh (without resume).
-		if sessionID != "" {
+		// Stale session — retry fresh (without resume), but only once.
+		if sessionID != "" && !retried {
 			deleteCodexSession(chatID)
-			return l.ProcessWithAttachment(chatID, text, att)
+			return l.processWithAttachment(chatID, text, att, true)
 		}
 
 		trimmed := strings.TrimSpace(string(out))

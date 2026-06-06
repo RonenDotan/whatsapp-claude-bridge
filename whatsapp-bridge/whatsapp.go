@@ -978,6 +978,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			Text:      content,
 			IsFromMe:  msg.Info.IsFromMe,
 			MessageID: msg.Info.ID,
+			RawData:   msg.Message, // pass proto so ReceiveAttachment can download directly
 		}
 		att, attErr := ch.ReceiveAttachment(inMsg)
 		if attErr != nil {

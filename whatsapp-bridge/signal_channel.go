@@ -72,7 +72,8 @@ func resolveSignalAttachmentPath(a signalAttachment) string {
 		}
 		// Try common image/document extensions.
 		for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".txt"} {
-			if candidate := base + ext; func() bool { _, e := os.Stat(candidate); return e == nil }() {
+			candidate := base + ext
+			if _, err := os.Stat(candidate); err == nil {
 				return candidate
 			}
 		}

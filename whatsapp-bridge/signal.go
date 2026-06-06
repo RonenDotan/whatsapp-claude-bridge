@@ -74,14 +74,21 @@ type signalSyncSentMessage struct {
 var signalAttachmentsDir string
 
 func init() {
+	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "windows":
-		signalAttachmentsDir = filepath.Join(os.Getenv("APPDATA"), "signal-cli", "attachments")
+		// signal-cli on Windows stores data in the Unix-style ~/.local/share/signal-cli/
+		// (not %APPDATA%\signal-cli\ as one might expect).  Try both and use whichever exists.
+		unixStyle := filepath.Join(home, ".local", "share", "signal-cli", "attachments")
+		appDataStyle := filepath.Join(os.Getenv("APPDATA"), "signal-cli", "attachments")
+		if _, err := os.Stat(unixStyle); err == nil {
+			signalAttachmentsDir = unixStyle
+		} else {
+			signalAttachmentsDir = appDataStyle
+		}
 	case "darwin":
-		home, _ := os.UserHomeDir()
 		signalAttachmentsDir = filepath.Join(home, "Library", "Application Support", "signal-cli", "attachments")
 	default: // linux
-		home, _ := os.UserHomeDir()
 		signalAttachmentsDir = filepath.Join(home, ".local", "share", "signal-cli", "attachments")
 	}
 }
@@ -514,6 +521,43 @@ func handleSignalMessage(env signalEnvelope) {
 			}
 			if transcript != "" {
 				content = "[🎤 Voice]: " + transcript
+			}
+		}
+		// Non-audio attachment (image) sent by the owner — process via LLM.
+		if content == "" && len(msg.Attachments) > 0 && isSignalAllowedChat(chatID) {
+			log.Printf("Signal sync: image attachment(s) in chat=%s attachments=%d", chatID, len(msg.Attachments))
+			ch := NewSignalChannel()
+			var llm LLM
+			if isSignalCodexChat(chatID) {
+				llm = NewCodexLLM()
+			} else {
+				llm = NewClaudeLLM()
+			}
+			inMsg := IncomingMessage{
+				ChatID:   chatID,
+				SenderID: "",
+				Text:     "",
+				IsFromMe: true,
+				RawData:  msg.Attachments,
+			}
+			att, attErr := ch.ReceiveAttachment(inMsg)
+			if attErr != nil {
+				sendSignalMessage(chatID, "⚠️ Could not process attachment: "+attErr.Error())
+				return
+			}
+			if att == nil {
+				log.Printf("Signal sync: attachment file not found on disk for chat=%s — skipping", chatID)
+			}
+			if att != nil {
+				go func() {
+					reply, procErr := llm.ProcessWithAttachment(chatID, "", att)
+					if procErr != nil {
+						sendSignalMessage(chatID, "⚠️ Could not process attachment: "+procErr.Error())
+						return
+					}
+					sendSignalMessage(chatID, reply)
+				}()
+				return
 			}
 		}
 		if content == "" {
