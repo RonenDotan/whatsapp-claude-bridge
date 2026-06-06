@@ -81,7 +81,8 @@ function Restart-Bridge {
             Write-Host "[UPDATE] whatsmeow $current -> $latest, rebuilding..."
             Push-Location $BRIDGE_DIR
             & go get go.mau.fi/whatsmeow@latest
-            & go build -o whatsapp-bridge.exe .
+            $ver = (Get-Content "$BRIDGE_DIR\VERSION" -Raw).Trim()
+            & go build -ldflags "-X main.Version=$ver" -o whatsapp-bridge.exe .
             Pop-Location
         } else {
             Write-Host "[OK] whatsmeow $current is current"
