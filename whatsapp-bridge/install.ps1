@@ -431,6 +431,56 @@ function Invoke-SignalLinking {
     }
 }
 
+function Invoke-VerifyAndSummary {
+    Write-Host 'Step 4: Launch and verify...'
+    Write-Host ''
+    Write-Host '  Everything is configured.'
+    Write-Host '  Press Enter to launch the bridge via start.bat and confirm it is running.'
+    Write-Host ''
+    Read-Host '  Press Enter to launch' | Out-Null
+
+    $startBat = Join-Path $BRIDGE_DIR 'start.bat'
+    if (-not (Test-Path $startBat)) {
+        Write-Host '[WARN] start.bat not found -- launch the bridge manually.'
+        return
+    }
+
+    Write-Host '[STEP] Running start.bat...'
+    Start-Process -FilePath 'cmd.exe' `
+        -ArgumentList ('/c ""' + $startBat + '""') `
+        -WindowStyle Normal
+
+    Write-Host '       Waiting for bridge on port 8080 (up to 60 s -- may rebuild first)...'
+    $ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 2
+        try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $tcp.Connect('localhost', 8080)
+            $tcp.Close()
+            $ready = $true
+            break
+        } catch {}
+    }
+
+    Write-Host ''
+    if ($ready) {
+        Write-Host -ForegroundColor Green '[OK] Bridge is running on port 8080.'
+        Write-Host ''
+        Write-Host -ForegroundColor Green '================================================================'
+        Write-Host -ForegroundColor Green '  Installation complete!'
+        Write-Host ''
+        Write-Host '  Start a Claude session : send  !meet-claude  in any chat'
+        Write-Host '  Start a Codex session  : send  !meet-codex   in any chat'
+        Write-Host '  End a session          : send  !clear-session'
+        Write-Host -ForegroundColor Green '================================================================'
+    } else {
+        Write-Host -ForegroundColor Yellow '[WARN] Bridge did not respond within 60 seconds.'
+        Write-Host -ForegroundColor Yellow '       It may still be rebuilding (whatsmeow auto-update can take a minute).'
+        Write-Host -ForegroundColor Yellow '       Check bridge.log once it finishes -- installation files are correct.'
+    }
+}
+
 function Invoke-LLMConfiguration {
     if ($LLM -in @('claude', 'both')) {
         Write-Host '[STEP] Configuring Claude...'
@@ -504,3 +554,5 @@ if (-not $pairingOk) {
 }
 
 Write-Host '[OK] LLM configuration complete.'
+Write-Host ''
+Invoke-VerifyAndSummary
