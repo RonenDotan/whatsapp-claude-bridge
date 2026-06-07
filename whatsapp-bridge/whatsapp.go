@@ -950,13 +950,29 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 	}
 
 	if mediaType == "audio" && content == "" && isAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
-		_, _, _, audioPath, dlErr := downloadMedia(client, messageStore, msg.Info.ID, chatJID)
+		// Use DownloadAny (same as images) — old client.Download path silently fails on modern whatsmeow
+		audioData, dlErr := client.DownloadAny(context.Background(), msg.Message)
 		if dlErr != nil {
+			fmt.Printf("Audio download failed for %s: %v\n", chatJID, dlErr)
 			sendWhatsAppMessage(client, chatJID, "⚠️ Could not download voice message: "+dlErr.Error(), "")
 			return
 		}
-		transcript, txErr := transcribeAudio(audioPath)
+		chatStorDir := filepath.Join("store", strings.ReplaceAll(chatJID, ":", "_"))
+		if err := os.MkdirAll(chatStorDir, 0755); err != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Could not save voice message: "+err.Error(), "")
+			return
+		}
+		audioFilename := "audio_" + time.Now().Format("20060102_150405") + ".ogg"
+		audioPath := filepath.Join(chatStorDir, audioFilename)
+		if err := os.WriteFile(audioPath, audioData, 0644); err != nil {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Could not save voice message: "+err.Error(), "")
+			return
+		}
+		absPath, _ := filepath.Abs(audioPath)
+		fmt.Printf("Downloaded audio via DownloadAny to %s (%d bytes)\n", absPath, len(audioData))
+		transcript, txErr := transcribeAudio(absPath)
 		if txErr != nil {
+			fmt.Printf("Audio transcription failed for %s: %v\n", chatJID, txErr)
 			sendWhatsAppMessage(client, chatJID, "⚠️ Could not transcribe voice message: "+txErr.Error(), "")
 			return
 		}
