@@ -38,6 +38,18 @@ if (-not $signalCliBat) {
     exit 1
 }
 
+function Rotate-LogFile([string]$path, [int]$keepCount = 5) {
+    if (-not (Test-Path $path)) { return }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $rotated = $path + '.' + $stamp
+    Rename-Item -Path $path -NewName $rotated -Force
+    # Keep only the most recent $keepCount rotated files for this base path
+    $old = Get-ChildItem -Path (Split-Path $path) -Filter ((Split-Path $path -Leaf) + '.*') |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip $keepCount
+    foreach ($f in $old) { Remove-Item $f.FullName -Force }
+}
+
 function Kill-ByCommandLine([string]$pattern) {
     Get-CimInstance Win32_Process |
         Where-Object { $_.CommandLine -like ('*' + $pattern + '*') } |
@@ -47,6 +59,7 @@ function Kill-ByCommandLine([string]$pattern) {
 function Restart-SignalCli {
     Write-Host 'Stopping signal-cli...'
     Kill-ByCommandLine 'signal-cli'
+    Rotate-LogFile ($BRIDGE_DIR + '\signal-cli.log')
     Start-Sleep -Milliseconds 800
     $p = Start-Process -FilePath $signalCliBat `
         -ArgumentList 'daemon --tcp 0.0.0.0:7583' `
@@ -72,6 +85,8 @@ function Restart-Bridge {
     # Kill-ByCommandLine catches both direct launches and cmd.exe log-wrapper processes
     Kill-ByCommandLine 'whatsapp-bridge.exe'
     Start-Sleep -Milliseconds 500
+    Rotate-LogFile ($BRIDGE_DIR + '\bridge.log')
+    Rotate-LogFile ($BRIDGE_DIR + '\bridge.err')
 
     # Check for whatsmeow updates before launching
     try {
