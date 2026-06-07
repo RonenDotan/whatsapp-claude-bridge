@@ -92,12 +92,19 @@ The bash sandbox has a corrupted git HEAD (null bytes) — bash git is unreliabl
 3. NEVER create one-off batch files — use the single reusable `_run.bat`
 
 **`_run.bat` pattern:**
-1. Write commands into `_run.bat` (redirect output → `_run_out.txt` in same dir)
+1. Write commands into `_run.bat` (redirect output → absolute path, see below)
 2. Open Win+R (`key: "win+r"`)
 3. `ctrl+a` to select all in Run field, then type: `C:\Users\ronen\whatsapp-mcp\whatsapp-bridge\_run.bat`
 4. Press Enter, wait 6–10 seconds
 5. Read `_run_out.txt` for results
 6. Reset `_run.bat` to placeholder after use
+
+**Output redirect — CRITICAL:** Always use an absolute path for the output file.
+In grouped commands `( ... ) > output.txt`, the redirect resolves BEFORE `cd` runs inside the group,
+so a relative path writes to the wrong directory. Always use:
+```
+( ... ) > C:\Users\ronen\whatsapp-mcp\whatsapp-bridge\_run_out.txt 2>&1
+```
 
 **Win+R tips:**
 - Always `ctrl+a` before typing — prevents appending to old path
