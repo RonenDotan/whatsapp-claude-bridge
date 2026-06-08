@@ -615,7 +615,8 @@ func parseCodexJSONL(output string) (sessionID string, inputTokens, outputTokens
 
 // handleWithClaude calls the Claude CLI and delivers the reply via sendFn.
 // sendFn receives both the final reply and any error messages.
-func handleWithClaude(chatID, messageText string, sendFn func(string)) {
+// sendMediaFn is called for each output file (image, PDF, etc.) created during the turn.
+func handleWithClaude(chatID, messageText string, sendFn func(string), sendMediaFn func(string)) {
 	sessions := loadSessions()
 	sessionID, hasSession := sessions[chatID]
 	isNewSession := !hasSession || sessionID == ""
@@ -638,6 +639,9 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 			messageText = prompt + "\n\n" + messageText
 		}
 	}
+
+	tracker := NewSnapshotTracker(chatDirPath)
+	tracker.Snapshot() // stage 1: record timestamp before LLM runs
 
 	runClaude := func(a []string) ([]byte, error) {
 		c := exec.Command("claude", a...)
@@ -733,12 +737,21 @@ func handleWithClaude(chatID, messageText string, sendFn func(string)) {
 	usageStatsMu.Unlock()
 
 	sendFn(resp.Result)
+
+	// stage 2: detect files created/modified during the LLM turn and deliver them
+	if files, err := tracker.Snapshot(); err == nil {
+		for _, path := range files {
+			fmt.Printf("Delivering output file to %s: %s\n", chatID, path)
+			sendMediaFn(path)
+		}
+	}
 }
 
 // ─── Codex dispatch ───────────────────────────────────────────────────────────
 
 // handleWithCodex calls the Codex CLI and delivers the reply via sendFn.
-func handleWithCodex(chatID, messageText string, sendFn func(string)) {
+// sendMediaFn is called for each output file created during the turn.
+func handleWithCodex(chatID, messageText string, sendFn func(string), sendMediaFn func(string)) {
 	sessions := loadCodexSessions()
 	sessionID := sessions[chatID]
 
@@ -776,6 +789,9 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 			}
 		}
 	}
+
+	tracker := NewSnapshotTracker(chatDirPath)
+	tracker.Snapshot() // stage 1: record timestamp before LLM runs
 
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = chatDirPath
@@ -823,4 +839,12 @@ func handleWithCodex(chatID, messageText string, sendFn func(string)) {
 	}
 
 	sendFn(replyText)
+
+	// stage 2: detect files created/modified during the LLM turn and deliver them
+	if files, err := tracker.Snapshot(); err == nil {
+		for _, path := range files {
+			fmt.Printf("Delivering output file to %s: %s\n", chatID, path)
+			sendMediaFn(path)
+		}
+	}
 }

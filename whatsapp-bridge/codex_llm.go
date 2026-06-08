@@ -30,7 +30,7 @@ func (l *CodexLLM) Process(chatID, text string) (string, error) {
 		} else {
 			result = reply
 		}
-	})
+	}, func(_ string) {})
 	return result, callErr
 }
 
