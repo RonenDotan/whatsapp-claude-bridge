@@ -1,0 +1,28 @@
+08:45:41.505[36m [Client INFO] Starting WhatsApp client...[0m
+08:45:42.298[36m [Client INFO] Successfully authenticated[0m
+08:45:43.019[36m [Client INFO] Connected to WhatsApp[0m
+
+✓ Connected to WhatsApp!
+Starting REST API server on :8080...
+08:48:34.954[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+08:49:18.113[36m [Client INFO] Using existing chat name for 120363407895179577@g.us: codex[0m
+08:49:18.138[36m [Client INFO] Using existing chat name for 120363407895179577@g.us: codex[0m
+[2026-06-07 08:49:17] → 183369484792019: [audio: audio_20260607_084918.ogg] 
+Attempting to download media for message AC5BBEE13870086BFA0E6A74DC2686AD in chat 120363407895179577@g.us...
+08:49:31.620[36m [Client INFO] Using existing chat name for 120363407895179577@g.us: codex[0m
+[2026-06-07 08:49:30] → 183369484792019: [audio: audio_20260607_084931.ogg] 
+Attempting to download media for message AC516D591BDE5250010A5CF9FAD83F38 in chat 120363407895179577@g.us...
+08:49:36.503[36m [Client INFO] Using existing chat name for 120363407895179577@g.us: codex[0m
+[2026-06-07 08:49:35] → 183369484792019: here?
+08:49:58.819[36m [Client INFO] Using existing chat name for 120363409956054412@g.us: claude[0m
+08:49:58.836[36m [Client INFO] Using existing chat name for 120363409956054412@g.us: claude[0m
+[2026-06-07 08:49:57] → 183369484792019: [audio: audio_20260607_084958.ogg] 
+Attempting to download media for message AC35AF67598E426A4C79EE813B5B6939 in chat 120363409956054412@g.us...
+08:50:10.164[36m [Client INFO] Using existing chat name for 120363409956054412@g.us: claude[0m
+[2026-06-07 08:50:09] → 183369484792019: [image: image_20260607_085010.jpg] 
+08:58:46.746[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+08:58:46.766[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+08:59:04.382[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+09:00:35.665[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+09:00:35.679[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+09:01:25.857[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m

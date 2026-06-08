@@ -1,0 +1,266 @@
+09:05:47.904[36m [Client INFO] Starting WhatsApp client...[0m
+09:05:48.482[36m [Client INFO] Successfully authenticated[0m
+09:05:49.199[36m [Client INFO] Connected to WhatsApp[0m
+
+✓ Connected to WhatsApp!
+Starting REST API server on :8080...
+09:06:30.560[36m [Client INFO] Using existing chat name for 120363409956054412@g.us: claude[0m
+[2026-06-07 09:06:29] → 183369484792019: [audio: audio_20260607_090630.ogg] 
+Downloaded audio via DownloadAny to C:\Users\ronen\whatsapp-mcp\whatsapp-bridge\store\120363409956054412@g.us\audio_20260607_090630.ogg (6849 bytes)
+09:06:43.832[33m [Client WARN] Node handling took 13.2974081s for <message addressing_mode="lid" count="0" from="120363409956054412@g.us" id="AC192C2CE77BFE5F0FC8791A697FFA76" notify="ronen dotan" participant="183369484792019@lid" sts="1780812389639380" t="1780812389" type="media"><enc mediatype="ptt" type="skmsg" v="2"><!-- 733 bytes --></enc></message>[0m
+09:07:07.493[36m [Client INFO] Using existing chat name for 120363409956054412@g.us: claude[0m
+[2026-06-07 09:07:06] → 183369484792019: [image: image_20260607_090707.jpg] 
+09:07:18.233[36m [Client INFO] Using existing chat name for 120363407895179577@g.us: codex[0m
+[2026-06-07 09:07:17] → 183369484792019: [audio: audio_20260607_090718.ogg] 
+Downloaded audio via DownloadAny to C:\Users\ronen\whatsapp-mcp\whatsapp-bridge\store\120363407895179577@g.us\audio_20260607_090718.ogg (8617 bytes)
+09:32:37.484[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+09:32:37.497[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+09:34:49.674[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+09:36:29.812[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+09:41:19.822[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+09:52:31.277[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+09:55:26.150[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+09:58:03.293[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+09:58:03.310[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+09:58:12.126[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+10:16:45.678[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+10:16:45.698[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+10:25:53.603[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+10:26:36.772[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+10:35:22.613[31m [Client/Socket ERROR] Error reading from websocket: failed to get reader: failed to read frame header: read tcp 192.168.1.106:49992->57.144.69.32:443: wsarecv: An existing connection was forcibly closed by the remote host.[0m
+10:35:23.372[36m [Client INFO] Successfully authenticated[0m
+10:35:23.906[36m [Client INFO] Connected to WhatsApp[0m
+10:45:14.814[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+10:48:26.867[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+10:50:03.153[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+10:52:40.723[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+10:52:51.946[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+10:53:49.301[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+10:53:49.320[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+10:57:25.719[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+10:57:25.730[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+11:00:05.152[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+11:00:05.164[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+11:00:09.439[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+11:03:56.242[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+11:03:58.355[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:05:01.039[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:05:22.803[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+11:07:30.520[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+11:08:05.909[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:08:08.738[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:08:10.118[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:16:29.666[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:19:28.907[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+11:21:55.722[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+11:31:11.768[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+11:32:05.057[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:32:06.582[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+11:36:14.822[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:38:27.950[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:40:03.120[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+11:41:18.693[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:47:45.977[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:50:07.569[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:51:53.852[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:55:42.384[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:56:30.997[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:56:55.348[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:57:04.585[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+11:57:12.406[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:57:30.899[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:57:32.317[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:57:38.558[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:57:44.702[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+11:57:53.730[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+12:03:18.767[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+12:09:01.756[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+12:09:36.678[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+12:17:56.868[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+12:25:00.992[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+12:25:39.212[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+12:33:31.648[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+13:01:13.030[36m [Client INFO] Using existing chat name for 120363403878553149@g.us: הבנים של ב׳3[0m
+13:10:02.235[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+13:18:56.215[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+13:22:32.403[36m [Client INFO] Using existing chat name for 972507922333-1535095340@g.us: אביב ואורי[0m
+13:24:24.959[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+13:35:37.798[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+13:48:33.225[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+13:50:00.527[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+13:50:35.436[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+13:50:40.301[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+13:53:55.845[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+13:58:58.317[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+13:59:42.188[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:00:13.075[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:07:08.046[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:11:39.553[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:13:46.541[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+14:17:00.672[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+14:20:02.750[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:20:40.517[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:22:29.014[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+14:23:34.264[31m [Client/Socket ERROR] Error reading from websocket: failed to get reader: failed to read frame header: EOF[0m
+14:23:34.806[36m [Client INFO] Successfully authenticated[0m
+14:23:35.168[36m [Client INFO] Connected to WhatsApp[0m
+14:28:31.218[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:29:49.717[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:34:17.607[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+14:34:22.868[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+14:35:38.768[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+14:49:02.739[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+15:12:03.977[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+15:13:05.075[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+15:13:39.266[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+15:13:59.308[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+15:14:06.955[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+15:15:05.854[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+15:15:06.092[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+15:17:29.130[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+15:22:21.276[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+15:30:04.063[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:30:14.818[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:32:23.690[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:32:42.985[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:36:26.868[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:37:00.357[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:42:22.360[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+15:48:27.594[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:48:27.617[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:48:49.419[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:52:04.498[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:52:04.518[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+15:53:40.167[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:09:24.758[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:09:24.777[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:10:02.260[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:10:07.466[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:10:07.485[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:10:34.405[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:11:11.230[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:11:26.137[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:11:37.654[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:13:16.493[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:13:16.510[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:13:26.277[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:14:15.060[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:16:05.823[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:25:50.756[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+16:27:10.868[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:27:10.889[36m [Client INFO] Using existing chat name for 120363424469772773@g.us: צהרון ב׳3 - שחרורים[0m
+16:28:39.875[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:35:04.003[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:35:41.676[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:39:38.147[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+16:41:34.683[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:45:16.650[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:45:32.897[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:45:32.914[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:47:00.338[36m [Client INFO] Using existing chat name for 120363218293408310@newsletter: 120363218293408310[0m
+16:47:09.676[33m [Client WARN] Plaintext message from 120363218293408310@newsletter doesn't have byte content[0m
+16:51:45.824[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:51:45.845[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:52:07.720[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+16:52:58.480[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:52:58.492[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:52:59.458[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:53:41.091[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:53:41.110[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:53:47.354[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+16:53:47.366[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+17:06:57.560[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:06:57.579[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:07:07.187[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:09:27.036[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+17:10:12.136[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:10:12.160[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:11:26.961[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:11:26.983[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:11:50.748[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:11:50.771[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:11:56.913[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:11:56.924[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:14:50.089[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:14:50.101[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:14:56.096[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:14:57.939[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:15:31.935[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+17:16:18.512[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+17:19:10.901[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:19:10.914[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+17:20:07.749[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+17:20:26.774[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+17:21:27.606[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+18:00:36.276[36m [Client INFO] Using existing chat name for 120363218293408310@newsletter: 120363218293408310[0m
+18:05:14.120[31m [Client/Socket ERROR] Error reading from websocket: failed to get reader: failed to read frame header: EOF[0m
+18:05:14.730[36m [Client INFO] Successfully authenticated[0m
+18:05:15.124[36m [Client INFO] Connected to WhatsApp[0m
+18:16:18.490[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+18:16:18.504[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+18:18:00.587[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+18:18:24.577[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:18:24.596[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:18:34.844[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+18:21:16.042[31m [Client/Socket ERROR] Error reading from websocket: failed to get reader: failed to read frame header: EOF[0m
+18:21:16.778[36m [Client INFO] Successfully authenticated[0m
+18:21:17.134[36m [Client INFO] Connected to WhatsApp[0m
+18:23:05.741[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:24:46.735[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:24:46.757[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:26:10.241[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:26:10.260[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:34:34.455[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:34:34.472[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+18:36:24.786[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+18:36:59.798[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+18:39:14.914[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+18:39:19.781[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+18:39:24.475[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+18:40:15.571[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+18:43:20.989[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+18:55:37.547[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+19:03:23.730[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+19:09:29.030[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+19:16:10.204[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+19:26:32.444[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+19:26:32.468[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+19:27:33.528[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+19:27:33.541[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+19:29:16.212[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+19:30:43.020[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+19:30:49.673[36m [Client INFO] Using existing chat name for 972545668377-1483689166@g.us: רבין 10[0m
+19:39:36.061[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+19:40:54.993[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+19:45:21.483[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+19:46:36.849[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+19:48:07.838[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+19:49:14.507[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+19:56:09.252[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+19:57:55.497[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+20:00:56.430[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+20:01:12.893[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+20:01:39.577[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+20:03:42.078[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+20:10:54.618[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+20:12:41.553[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+20:18:08.726[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+20:18:19.770[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+20:18:27.400[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+20:18:29.420[36m [Client INFO] Using existing chat name for 120363324284226510@g.us: הורי כיתה ב'3[0m
+20:30:41.161[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+20:34:53.891[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+21:01:01.036[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+21:04:38.477[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+21:05:02.380[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+21:05:43.479[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+21:06:09.663[36m [Client INFO] Using existing chat name for 120363204511710659@newsletter: 120363204511710659[0m
+21:13:23.702[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+21:36:09.415[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+21:36:22.643[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+21:37:45.510[36m [Client INFO] Using existing chat name for 272223768158263@lid: 272223768158263[0m
+21:56:11.478[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+21:56:31.535[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m
+21:56:58.819[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+21:58:18.338[36m [Client INFO] Using existing chat name for 120363259659804101@newsletter: 120363259659804101[0m
+21:59:18.451[36m [Client INFO] Using existing chat name for 120363201733549020@newsletter: 120363201733549020[0m

@@ -1040,7 +1040,9 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			} else {
 				go handleWithCodex(chatJID, content, func(reply string) {
 					sendWhatsAppMessage(client, chatJID, reply, "")
-				}, func(_ string) {})
+				}, func(path string) {
+					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
+				})
 			}
 		} else {
 			if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
@@ -1070,7 +1072,9 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			} else {
 				go handleWithClaude(chatJID, content, func(reply string) {
 					sendWhatsAppMessage(client, chatJID, reply, "")
-				}, func(_ string) {})
+				}, func(path string) {
+					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
+				})
 			}
 		}
 	}

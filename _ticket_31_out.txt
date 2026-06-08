@@ -1,0 +1,2 @@
+https://github.com/RonenDotan/whatsapp-claude-bridge/issues/33
+Exit code: 0 

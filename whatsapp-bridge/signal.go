@@ -452,7 +452,9 @@ func dispatchSignalContent(chatID, content string) {
 			}
 			sendSignalMessage(chatID, reply)
 		} else {
-			go handleWithCodex(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(_ string) {})
+			go handleWithCodex(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
+				sendSignalMessage(chatID, "📎 [test] output file: "+path)
+			})
 		}
 	} else {
 		if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
@@ -471,7 +473,9 @@ func dispatchSignalContent(chatID, content string) {
 			}
 			sendSignalMessage(chatID, reply)
 		} else {
-			go handleWithClaude(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(_ string) {})
+			go handleWithClaude(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
+				sendSignalMessage(chatID, "📎 [test] output file: "+path)
+			})
 		}
 	}
 }

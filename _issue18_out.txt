@@ -1,0 +1,117 @@
+title:	feat: Installation & Setup Wizard
+state:	OPEN
+author:	RonenDotan
+labels:	
+comments:	0
+assignees:	
+projects:	whatsapp-claude-bridge (Open)
+milestone:	
+number:	18
+--
+## Overview
+
+Interactive installation and startup scripts that guide a new user from zero to a fully running WhatsApp/Signal AI bridge. Covers channel selection, prerequisite checks, device pairing, LLM configuration, and startup automation.
+
+## Architecture & Key Decisions
+
+### What gets installed
+- **signal-cli** — Java daemon that connects to Signal as a linked device (like Signal Desktop). Auto-downloaded if not found.
+- **whatsapp-mcp-server** — Python FastMCP server using whatsmeow to connect WhatsApp as a linked device.  
+- **Go bridge** — the main gateway that routes messages between Signal/WhatsApp and the AI (Claude/Codex).
+
+### Channel pairing model
+Both WhatsApp and Signal work as independent linked devices — not piggyback on existing apps. Each requires a one-time QR scan with the user's phone. After pairing, credentials are stored locally and connection is fully headless.
+
+- WhatsApp: QR scan via `whatsapp-mcp-server`. Session stored in `store/whatsapp.db`. Idempotent — skips if already paired.
+- Signal: `signal-cli link` command generates a QR. Session stored in signal-cli data dir. Idempotent — skips if already registered.
+
+### LLM selection
+User chooses Claude, Codex, or both during install. Only the relevant credentials are requested. Each chat is individually activated via `!meet-claude` or `!meet-codex` — no pre-configuration of chats needed.
+
+### Privacy model
+For non-activated chats, the bridge only reads the first 2 characters of each message to check for `!meet-*` commands. Message content is never stored, logged, or sent to any AI unless the chat has been explicitly activated. WhatsApp chat metadata (JID, name, timestamp) is stored in SQLite regardless.
+
+### whatsmeow auto-update
+On every startup, `start.ps1`/`start.sh` checks whether a newer whatsmeow version is available. If so, it runs `go get -u go.mau.fi/whatsmeow && go build` before starting the bridge. Most restarts are instant; the occasional one takes a few minutes when WhatsApp releases a protocol update.
+
+### Cross-platform
+The Go bridge is already cross-platform (uses `filepath.Join` throughout). Two small fixes needed in `signal.go` for macOS paths. Scripts need a `start.sh` parallel to the existing `start.ps1`.
+
+## Installation Flow
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    install script                        │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       ▼
+         ┌─────────────────────────┐
+         │  Check prerequisites    │
+         │  Go / Java / Python /   │
+         │  Node (per selection)   │
+         └────────────┬────────────┘
+                      │
+                      ▼
+         ┌─────────────────────────┐
+         │  Select channels        │
+         │  [1] WhatsApp           │
+         │  [2] Signal             │
+         │  [3] Both               │
+         └────────────┬────────────┘
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+          ▼                       ▼
+  ┌──────────────┐       ┌──────────────┐
+  │  WhatsApp    │       │   Signal     │
+  │  setup       │       │   setup      │
+  │              │       │              │
+  │  Already     │       │  Already     │
+  │  paired? ──Yes─►skip │  linked? ──Yes►skip│
+  │     │No      │       │    │No       │
+  │     ▼        │       │    ▼         │
+  │  Show QR     │       │  Show QR     │
+  │  (scan with  │       │  (scan with  │
+  │  WhatsApp)   │       │  Signal app) │
+  └──────┬───────┘       └──────┬───────┘
+         └───────────┬──────────┘
+                     │
+                     ▼
+         ┌─────────────────────────┐
+         │  Select LLM             │
+         │  [1] Claude             │
+         │  [2] Codex              │
+         │  [3] Both               │
+         └────────────┬────────────┘
+                      │
+                      ▼
+         ┌─────────────────────────┐
+         │  Configure credentials  │
+         │  (only for selected)    │
+         │  • Anthropic API key    │
+         │  • OpenAI API key       │
+         │  • bypassPermissions    │
+         └────────────┬────────────┘
+                      │
+                      ▼
+         ┌─────────────────────────┐
+         │  Build bridge           │
+         │  go build               │
+         └────────────┬────────────┘
+                      │
+                      ▼
+         ┌─────────────────────────┐
+         │  Start all components   │
+         │  (via start script)     │
+         └────────────┬────────────┘
+                      │
+                      ▼
+         ┌─────────────────────────┐
+         │  Verify & summarize     │
+         │  Print: what's running, │
+         │  how to activate chats  │
+         └─────────────────────────┘
+```
+
+## Sub-issues
+See linked issues below.

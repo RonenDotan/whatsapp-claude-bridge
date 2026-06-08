@@ -1,0 +1,8 @@
+a24d6ca feat(sessions): copy settings.local.json template to each chat on !meet (#29)
+243382b feat(installer): add Step 4 launch verification and summary (#28)
+670c937 feat: interactive prompts for -Channels and -LLM when not provided as parameters (closes #27)
+7657313 feat: Signal linking wizard step (closes #26) - add Invoke-SignalLinking, Find-SignalCli, Test-SignalLinked, Stop-SignalCli, progress heartbeat, refactor prerequisites signal-cli block
+debd68c feat: LLM configuration step in installer (closes #27) - add Invoke-LLMConfiguration, settings helpers, store/ dir guard, null-safe API key input, remove settings.local.json write (moved to #29)
+be8ac2f fix: address start.sh review findings - kill bridge before restart, fix go build dir, signal-cli error handling, binary existence check, fix CLAUDE.md
+6a5f5fe feat: add start.sh for Linux/macOS (closes #23)
+b07a757 fix: start.bat blank-arg bug, cmd.exe quote-stripping in Restart-Bridge
