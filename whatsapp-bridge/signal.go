@@ -195,6 +195,60 @@ func signalMarkSeen(key string) bool {
 
 // ─── sendSignalMessage ────────────────────────────────────────────────────────
 
+// sendSignalFile sends a file attachment to a Signal chat via signal-cli's
+// JSON-RPC "send" method with the "attachments" parameter.
+func sendSignalFile(chatID, filePath string) {
+	signalConnMu.Lock()
+	conn := signalConn
+	signalConnMu.Unlock()
+
+	if conn == nil {
+		log.Printf("Signal: cannot send file to %s — not connected", chatID)
+		return
+	}
+
+	id := atomic.AddInt64(&signalIDCounter, 1)
+
+	var params map[string]interface{}
+	if strings.HasPrefix(chatID, "+") {
+		params = map[string]interface{}{
+			"recipient":   []string{chatID},
+			"attachments": []string{filePath},
+		}
+	} else {
+		params = map[string]interface{}{
+			"groupId":     chatID,
+			"attachments": []string{filePath},
+		}
+	}
+
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "send",
+		"params":  params,
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		log.Printf("Signal: marshal sendFile error: %v", err)
+		return
+	}
+	data = append(data, '\n')
+
+	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	if _, err := conn.Write(data); err != nil {
+		log.Printf("Signal: write error sending file to %s: %v", chatID, err)
+		signalConnMu.Lock()
+		if signalConn == conn {
+			signalConn = nil
+		}
+		signalConnMu.Unlock()
+		conn.Close()
+	}
+	conn.SetWriteDeadline(time.Time{})
+	log.Printf("Signal: sent file %s to %s", filePath, chatID)
+}
+
 func sendSignalMessage(chatID, message string) {
 	signalConnMu.Lock()
 	conn := signalConn
@@ -453,7 +507,7 @@ func dispatchSignalContent(chatID, content string) {
 			sendSignalMessage(chatID, reply)
 		} else {
 			go handleWithCodex(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
-				sendSignalMessage(chatID, "📎 [test] output file: "+path)
+				sendSignalFile(chatID, path)
 			})
 		}
 	} else {
@@ -474,7 +528,7 @@ func dispatchSignalContent(chatID, content string) {
 			sendSignalMessage(chatID, reply)
 		} else {
 			go handleWithClaude(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
-				sendSignalMessage(chatID, "📎 [test] output file: "+path)
+				sendSignalFile(chatID, path)
 			})
 		}
 	}

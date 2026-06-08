@@ -1041,7 +1041,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 				go handleWithCodex(chatJID, content, func(reply string) {
 					sendWhatsAppMessage(client, chatJID, reply, "")
 				}, func(path string) {
-					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
+					sendWhatsAppMessage(client, chatJID, "", path)
 				})
 			}
 		} else {
@@ -1073,7 +1073,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 				go handleWithClaude(chatJID, content, func(reply string) {
 					sendWhatsAppMessage(client, chatJID, reply, "")
 				}, func(path string) {
-					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
+					sendWhatsAppMessage(client, chatJID, "", path)
 				})
 			}
 		}
