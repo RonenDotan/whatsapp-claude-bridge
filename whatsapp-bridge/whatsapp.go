@@ -411,10 +411,10 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 			mediaType = whatsmeow.MediaAudio
 			mimeType = "audio/ogg; codecs=opus"
 		case "mp3":
-			mediaType = whatsmeow.MediaAudio
+			mediaType = whatsmeow.MediaDocument
 			mimeType = "audio/mpeg"
 		case "wav":
-			mediaType = whatsmeow.MediaAudio
+			mediaType = whatsmeow.MediaDocument
 			mimeType = "audio/wav"
 		case "mp4":
 			mediaType = whatsmeow.MediaVideo
