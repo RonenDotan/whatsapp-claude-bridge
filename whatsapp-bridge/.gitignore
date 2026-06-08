@@ -24,3 +24,10 @@ store/chats/
 store/whatsapp.db
 whatsapp.db
 *.db
+
+# Scratch / temp files written by Claude during dev sessions
+_run.bat
+_run_out.txt
+_issue_body.txt
+build_*.log
+log.Printf

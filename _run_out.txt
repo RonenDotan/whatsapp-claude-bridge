@@ -1,5 +1,0 @@
-31	OPEN	Session permissions via commands	enhancement	2026-06-06T10:02:42Z
-18	OPEN	feat: Installation & Setup Wizard		2026-06-02T07:00:54Z
-17	OPEN	docs: document new refactored architecture in CLAUDE.md for coding session context		2026-05-31T06:29:03Z
-16	OPEN	feat: replace local Whisper CLI with OpenAI Whisper API		2026-05-31T11:27:14Z
-12	OPEN	support changing the models via keywords.		2026-05-29T07:53:47Z

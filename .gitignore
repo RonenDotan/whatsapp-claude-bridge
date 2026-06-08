@@ -4,3 +4,8 @@
 claude_desktop_config.json
 whatsapp.log
 logs/
+
+# Scratch / temp files written by Claude during dev sessions
+_*.bat
+_*.txt
+_add_out.txt
