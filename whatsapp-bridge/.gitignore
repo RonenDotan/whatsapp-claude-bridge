@@ -2,9 +2,12 @@
 *.exe
 *.exe~
 
-# Logs
+# Logs (current + rotated copies)
 *.log
 *.err
+bridge.log.*
+bridge.err.*
+signal-cli.log.*
 
 # Runtime store data (sessions, personality state, media)
 store/sessions.json

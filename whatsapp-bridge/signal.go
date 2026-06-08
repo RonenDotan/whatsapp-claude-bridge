@@ -507,6 +507,7 @@ func dispatchSignalContent(chatID, content string) {
 			sendSignalMessage(chatID, reply)
 		} else {
 			go handleWithCodex(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
+				sendSignalMessage(chatID, "📎 [test] output file: "+path)
 				sendSignalFile(chatID, path)
 			})
 		}
@@ -528,6 +529,7 @@ func dispatchSignalContent(chatID, content string) {
 			sendSignalMessage(chatID, reply)
 		} else {
 			go handleWithClaude(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
+				sendSignalMessage(chatID, "📎 [test] output file: "+path)
 				sendSignalFile(chatID, path)
 			})
 		}
