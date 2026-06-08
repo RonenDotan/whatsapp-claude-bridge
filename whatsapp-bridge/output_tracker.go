@@ -22,6 +22,8 @@ var outputFileExts = map[string]bool{
 	".jpeg": true,
 	".webp": true,
 	".gif":  true,
+	".mp3":  true,
+	".wav":  true,
 	".mp4":  true,
 	".pdf":  true,
 	".docx": true,
