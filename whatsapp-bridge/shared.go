@@ -306,6 +306,45 @@ func transcribeAudio(filePath string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+// ─── Running process management (cancel / timeout / busy) ────────────────────
+
+var (
+	runningCancelsMu sync.Mutex
+	runningCancels   = map[string]context.CancelFunc{}
+)
+
+// setRunningCancel registers a cancel func for chatID.
+// Returns false if a process is already running for that chat.
+func setRunningCancel(chatID string, cancel context.CancelFunc) bool {
+	runningCancelsMu.Lock()
+	defer runningCancelsMu.Unlock()
+	if _, busy := runningCancels[chatID]; busy {
+		return false
+	}
+	runningCancels[chatID] = cancel
+	return true
+}
+
+// clearRunningCancel removes the cancel entry for chatID (called on completion).
+func clearRunningCancel(chatID string) {
+	runningCancelsMu.Lock()
+	defer runningCancelsMu.Unlock()
+	delete(runningCancels, chatID)
+}
+
+// CancelRunning kills the running process for chatID.
+// Returns true if there was something to cancel.
+func CancelRunning(chatID string) bool {
+	runningCancelsMu.Lock()
+	defer runningCancelsMu.Unlock()
+	cancel, ok := runningCancels[chatID]
+	if ok {
+		cancel()
+		delete(runningCancels, chatID)
+	}
+	return ok
+}
+
 // ─── WhatsApp whitelist management ───────────────────────────────────────────
 
 var (
@@ -617,6 +656,21 @@ func parseCodexJSONL(output string) (sessionID string, inputTokens, outputTokens
 // sendFn receives both the final reply and any error messages.
 // sendMediaFn is called for each output file (image, PDF, etc.) created during the turn.
 func handleWithClaude(chatID, messageText string, sendFn func(string), sendMediaFn func(string)) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	if !setRunningCancel(chatID, cancel) {
+		sendFn("⏳ Still working on your previous request. Send `!cancel` to stop it.")
+		return
+	}
+	defer clearRunningCancel(chatID)
+
+	// After 3 minutes, send a "still working" nudge.
+	workingTimer := time.AfterFunc(3*time.Minute, func() {
+		sendFn("⏳ Still working on this, hang tight...")
+	})
+	defer workingTimer.Stop()
+
 	sessions := loadSessions()
 	sessionID, hasSession := sessions[chatID]
 	isNewSession := !hasSession || sessionID == ""
@@ -644,7 +698,7 @@ func handleWithClaude(chatID, messageText string, sendFn func(string), sendMedia
 	tracker.Snapshot() // stage 1: record timestamp before LLM runs
 
 	runClaude := func(a []string) ([]byte, error) {
-		c := exec.Command("claude", a...)
+		c := exec.CommandContext(ctx, "claude", a...)
 		c.Dir = chatDirPath
 		c.Stdin = strings.NewReader(messageText)
 		return c.Output()
@@ -653,6 +707,10 @@ func handleWithClaude(chatID, messageText string, sendFn func(string), sendMedia
 	out, err := runClaude(args)
 	if err != nil && hasSession && sessionID != "" {
 		// Session may be stale (created under a different working dir) — drop and retry fresh.
+		// But don't retry if we were cancelled or timed out.
+		if ctx.Err() != nil {
+			goto handleErr
+		}
 		log.Printf("Claude CLI resume failed for %s (session %s), retrying fresh: %v", chatID, sessionID, err)
 		deleteSession(chatID)
 		freshArgs := []string{"-p", "--output-format", "json"}
@@ -664,7 +722,15 @@ func handleWithClaude(chatID, messageText string, sendFn func(string), sendMedia
 		}
 		out, err = runClaude(freshArgs)
 	}
+handleErr:
 	if err != nil {
+		switch ctx.Err() {
+		case context.DeadlineExceeded:
+			sendFn("⏱ Timed out after 10 minutes.")
+			return
+		case context.Canceled:
+			return // user cancelled; !cancel already sent the reply
+		}
 		errMsg := err.Error()
 		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
 			stderrStr := strings.TrimSpace(string(exitErr.Stderr))
@@ -752,6 +818,21 @@ func handleWithClaude(chatID, messageText string, sendFn func(string), sendMedia
 // handleWithCodex calls the Codex CLI and delivers the reply via sendFn.
 // sendMediaFn is called for each output file created during the turn.
 func handleWithCodex(chatID, messageText string, sendFn func(string), sendMediaFn func(string)) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	if !setRunningCancel(chatID, cancel) {
+		sendFn("⏳ Still working on your previous request. Send `!cancel` to stop it.")
+		return
+	}
+	defer clearRunningCancel(chatID)
+
+	// After 3 minutes, send a "still working" nudge.
+	workingTimer := time.AfterFunc(3*time.Minute, func() {
+		sendFn("⏳ Still working on this, hang tight...")
+	})
+	defer workingTimer.Stop()
+
 	sessions := loadCodexSessions()
 	sessionID := sessions[chatID]
 
@@ -793,10 +874,17 @@ func handleWithCodex(chatID, messageText string, sendFn func(string), sendMediaF
 	tracker := NewSnapshotTracker(chatDirPath)
 	tracker.Snapshot() // stage 1: record timestamp before LLM runs
 
-	cmd := exec.Command("codex", args...)
+	cmd := exec.CommandContext(ctx, "codex", args...)
 	cmd.Dir = chatDirPath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch ctx.Err() {
+		case context.DeadlineExceeded:
+			sendFn("⏱ Timed out after 10 minutes.")
+			return
+		case context.Canceled:
+			return // user cancelled; !cancel already sent the reply
+		}
 		log.Printf("Codex exec error for %s: %v\nOutput: %s", chatID, err, string(out))
 		trimmed := strings.TrimSpace(string(out))
 		if trimmed != "" {

@@ -366,7 +366,7 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 	isPersonality := strings.HasPrefix(cmd, "!set-personality")
 	isIcon := strings.HasPrefix(cmd, "!set-icon")
 	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session":
+	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session", "!cancel":
 	default:
 		if !isPersonality && !isIcon {
 			return false
@@ -384,9 +384,16 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			"!meet-codex — add this chat to Codex whitelist\n"+
 			"!remove-codex — remove this chat from Codex whitelist\n"+
 			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
+			"!cancel — cancel the currently running request\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
 			"!stats — show token usage and cost for this session\n"+
 			"!help — show this help screen")
+	case "!cancel":
+		if CancelRunning(chatID) {
+			sendSignalMessage(chatID, "🛑 Cancelled.")
+		} else {
+			sendSignalMessage(chatID, "Nothing is currently running.")
+		}
 	case "!meet-claude":
 		signalAllowedChatsMu.Lock()
 		signalAllowedChats[chatID] = struct{}{}
