@@ -46,11 +46,19 @@ type signalAttachment struct {
 	VoiceNote   bool   `json:"voiceNote"`
 }
 
+type signalReaction struct {
+	Emoji               string `json:"emoji"`
+	TargetAuthor        string `json:"targetAuthor"`
+	TargetSentTimestamp int64  `json:"targetSentTimestamp"`
+	IsRemove            bool   `json:"isRemove"`
+}
+
 type signalDataMessage struct {
 	Timestamp   int64              `json:"timestamp"`
 	Message     string             `json:"message"`
 	GroupInfo   *signalGroupInfo   `json:"groupInfo"`
 	Attachments []signalAttachment `json:"attachments"`
+	Reaction    *signalReaction    `json:"reaction"`
 }
 
 type signalGroupInfo struct {
@@ -170,6 +178,9 @@ var (
 	signalIDCounter int64
 )
 
+// signalPendingSends maps RPC id (int64) → chan int64 (sent timestamp result).
+var signalPendingSends sync.Map
+
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
 var (
@@ -249,17 +260,23 @@ func sendSignalFile(chatID, filePath string) {
 	log.Printf("Signal: sent file %s to %s", filePath, chatID)
 }
 
-func sendSignalMessage(chatID, message string) {
+// sendSignalMessage sends a text message and blocks until signal-cli returns the
+// sent timestamp (milliseconds). Returns 0 on error or timeout.
+func sendSignalMessage(chatID, message string) int64 {
 	signalConnMu.Lock()
 	conn := signalConn
 	signalConnMu.Unlock()
 
 	if conn == nil {
 		log.Printf("Signal: cannot send to %s — not connected", chatID)
-		return
+		return 0
 	}
 
 	id := atomic.AddInt64(&signalIDCounter, 1)
+
+	// Register a pending channel so the read loop can deliver the result.
+	resCh := make(chan int64, 1)
+	signalPendingSends.Store(id, resCh)
 
 	var params map[string]interface{}
 	if strings.HasPrefix(chatID, "+") {
@@ -283,21 +300,34 @@ func sendSignalMessage(chatID, message string) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		log.Printf("Signal: marshal send error: %v", err)
-		return
+		signalPendingSends.Delete(id)
+		return 0
 	}
 	data = append(data, '\n')
 
 	conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 	if _, err := conn.Write(data); err != nil {
 		log.Printf("Signal: write error sending to %s: %v", chatID, err)
+		signalPendingSends.Delete(id)
 		signalConnMu.Lock()
 		if signalConn == conn {
 			signalConn = nil
 		}
 		signalConnMu.Unlock()
 		conn.Close()
+		return 0
 	}
 	conn.SetWriteDeadline(time.Time{})
+
+	// Block until the read loop delivers the sent timestamp.
+	select {
+	case ts := <-resCh:
+		return ts
+	case <-time.After(15 * time.Second):
+		log.Printf("Signal: timeout waiting for send result id=%d chat=%s", id, chatID)
+		signalPendingSends.Delete(id)
+		return 0
+	}
 }
 
 // ─── Owner number auto-detection ─────────────────────────────────────────────
@@ -513,7 +543,12 @@ func dispatchSignalContent(chatID, content string) {
 			}
 			sendSignalMessage(chatID, reply)
 		} else {
-			go handleWithCodex(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
+			go handleWithCodex(chatID, content, func(reply string) {
+				ts := sendSignalMessage(chatID, reply)
+				if ts != 0 {
+					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+				}
+			}, func(path string) {
 				sendSignalMessage(chatID, "📎 [test] output file: "+path)
 				sendSignalFile(chatID, path)
 			})
@@ -535,7 +570,12 @@ func dispatchSignalContent(chatID, content string) {
 			}
 			sendSignalMessage(chatID, reply)
 		} else {
-			go handleWithClaude(chatID, content, func(reply string) { sendSignalMessage(chatID, reply) }, func(path string) {
+			go handleWithClaude(chatID, content, func(reply string) {
+				ts := sendSignalMessage(chatID, reply)
+				if ts != 0 {
+					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+				}
+			}, func(path string) {
 				sendSignalMessage(chatID, "📎 [test] output file: "+path)
 				sendSignalFile(chatID, path)
 			})
@@ -662,6 +702,22 @@ func handleSignalMessage(env signalEnvelope) {
 		return
 	}
 
+	// ── Reaction handling ─────────────────────────────────────────────────────
+	if env.DataMessage.Reaction != nil {
+		r := env.DataMessage.Reaction
+		if r.IsRemove || r.Emoji == "" || !isSignalAllowedChat(chatID) {
+			return
+		}
+		targetKey := fmt.Sprintf("%d", r.TargetSentTimestamp)
+		text, found := LookupRecentMessage(chatID, targetKey)
+		if !found {
+			sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
+			return
+		}
+		sendSignalMessage(chatID, fmt.Sprintf("🔍 Reaction: %s\nOriginal message: %s", r.Emoji, text))
+		return
+	}
+
 	log.Printf("Signal ← %s (chat=%s): %s", env.Source, chatID, content)
 
 	isFromMe := signalOwnerNumber != "" && env.Source == signalOwnerNumber
@@ -713,6 +769,11 @@ func handleSignalMessage(env signalEnvelope) {
 			}()
 			return
 		}
+	}
+
+	// Store incoming user message for reaction lookup.
+	if content != "" {
+		StoreRecentMessage(chatID, fmt.Sprintf("%d", env.DataMessage.Timestamp), content)
 	}
 
 	dispatchSignalContent(chatID, content)
@@ -794,6 +855,20 @@ func startSignalListener() {
 			} else if msg.Method == "" && msg.ID != nil && msg.ID != float64(0) {
 				if len(msg.Error) > 0 && string(msg.Error) != "null" {
 					log.Printf("Signal: RPC error id=%v: %s", msg.ID, string(msg.Error))
+				}
+				// Deliver sent timestamp to waiting sendSignalMessage call.
+				if len(msg.Result) > 0 && string(msg.Result) != "null" {
+					var result struct {
+						Timestamp int64 `json:"timestamp"`
+					}
+					if jerr := json.Unmarshal(msg.Result, &result); jerr == nil && result.Timestamp != 0 {
+						if idFloat, ok := msg.ID.(float64); ok {
+							rpcID := int64(idFloat)
+							if ch, loaded := signalPendingSends.LoadAndDelete(rpcID); loaded {
+								ch.(chan int64) <- result.Timestamp
+							}
+						}
+					}
 				}
 			}
 		}
