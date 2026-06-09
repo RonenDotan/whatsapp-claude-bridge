@@ -50,7 +50,7 @@ type signalReaction struct {
 	Emoji               string `json:"emoji"`
 	TargetAuthor        string `json:"targetAuthor"`
 	TargetSentTimestamp int64  `json:"targetSentTimestamp"`
-	IsRemove            bool   `json:"isRemove"`
+	IsRemove            bool   `json:"remove"`
 }
 
 type signalDataMessage struct {
@@ -76,6 +76,7 @@ type signalSyncSentMessage struct {
 	Destination string             `json:"destination"`
 	GroupInfo   *signalGroupInfo   `json:"groupInfo"`
 	Attachments []signalAttachment `json:"attachments"`
+	Reaction    *signalReaction    `json:"reaction"`
 }
 
 // signalAttachmentsDir is where signal-cli daemon auto-saves received attachments.
@@ -618,6 +619,24 @@ func handleSignalMessage(env signalEnvelope) {
 		if signalMarkSeen(dedupeKey) {
 			return
 		}
+
+		// ── Reaction in sync (owner reacted from their own device) ────────────
+		if msg.Reaction != nil {
+			r := msg.Reaction
+			log.Printf("Signal sync reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
+			if r.IsRemove || r.Emoji == "" || !isSignalAllowedChat(chatID) {
+				return
+			}
+			targetKey := fmt.Sprintf("%d", r.TargetSentTimestamp)
+			text, found := LookupRecentMessage(chatID, targetKey)
+			if !found {
+				sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
+				return
+			}
+			sendSignalMessage(chatID, fmt.Sprintf("🔍 Reaction: %s\nOriginal message: %s", r.Emoji, text))
+			return
+		}
+
 		content := msg.Message
 		if content == "" && len(msg.Attachments) > 0 {
 			transcript, err := transcribeSignalVoice(msg.Attachments)
@@ -706,6 +725,7 @@ func handleSignalMessage(env signalEnvelope) {
 	// ── Reaction handling ─────────────────────────────────────────────────────
 	if env.DataMessage.Reaction != nil {
 		r := env.DataMessage.Reaction
+		log.Printf("Signal data reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
 		if r.IsRemove || r.Emoji == "" || !isSignalAllowedChat(chatID) {
 			return
 		}
