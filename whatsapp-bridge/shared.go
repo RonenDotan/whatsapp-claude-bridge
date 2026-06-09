@@ -306,6 +306,49 @@ func transcribeAudio(filePath string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+// ─── Recent message cache (for reaction lookups) ─────────────────────────────
+
+const recentMessageCacheSize = 20
+
+type cachedMessage struct {
+	ID   string
+	Text string
+}
+
+var (
+	recentMsgMu    sync.Mutex
+	recentMsgCache = map[string][]cachedMessage{} // chatID -> last N messages
+)
+
+// StoreRecentMessage saves a message ID+text for a chat, evicting the oldest if at capacity.
+// Only call for real user/LLM text — not bridge commands or system responses.
+func StoreRecentMessage(chatID, msgID, text string) {
+	if text == "" || msgID == "" {
+		return
+	}
+	recentMsgMu.Lock()
+	defer recentMsgMu.Unlock()
+	log.Printf("[cache] store chat=%s msgID=%q text=%q", chatID, msgID, text)
+	msgs := recentMsgCache[chatID]
+	msgs = append(msgs, cachedMessage{ID: msgID, Text: text})
+	if len(msgs) > recentMessageCacheSize {
+		msgs = msgs[len(msgs)-recentMessageCacheSize:]
+	}
+	recentMsgCache[chatID] = msgs
+}
+
+// LookupRecentMessage finds a message by ID in the per-chat cache.
+func LookupRecentMessage(chatID, msgID string) (string, bool) {
+	recentMsgMu.Lock()
+	defer recentMsgMu.Unlock()
+	for _, m := range recentMsgCache[chatID] {
+		if m.ID == msgID {
+			return m.Text, true
+		}
+	}
+	return "", false
+}
+
 // ─── Running process management (cancel / timeout / busy) ────────────────────
 
 var (
