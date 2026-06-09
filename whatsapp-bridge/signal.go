@@ -671,6 +671,7 @@ func handleSignalMessage(env signalEnvelope) {
 			return
 		}
 		log.Printf("Signal sync← (chat=%s): %s", chatID, content)
+		StoreRecentMessage(chatID, fmt.Sprintf("%d", msg.Timestamp), content)
 		dispatchSignalContent(chatID, content)
 		return
 	}
