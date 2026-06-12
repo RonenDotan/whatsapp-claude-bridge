@@ -968,6 +968,17 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 
 	content := extractTextContent(msg.Message)
 
+	// ── Reply context: prepend quoted message to prompt ──────────────────────
+	if ext := msg.Message.GetExtendedTextMessage(); ext != nil {
+		if ctx := ext.GetContextInfo(); ctx != nil && ctx.GetQuotedMessage() != nil {
+			quotedText := extractTextContent(ctx.GetQuotedMessage())
+			if quotedText == "" {
+				quotedText = "(no text)"
+			}
+			content = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quotedText, content)
+		}
+	}
+
 	if !isAllowedChat(chatJID) {
 		if len(content) < 2 || content[:2] != "!m" {
 			return

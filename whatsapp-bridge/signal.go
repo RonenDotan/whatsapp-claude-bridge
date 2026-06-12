@@ -53,12 +53,19 @@ type signalReaction struct {
 	IsRemove            bool   `json:"remove"`
 }
 
+type signalQuote struct {
+	ID     int64  `json:"id"`
+	Author string `json:"author"`
+	Text   string `json:"text"`
+}
+
 type signalDataMessage struct {
 	Timestamp   int64              `json:"timestamp"`
 	Message     string             `json:"message"`
 	GroupInfo   *signalGroupInfo   `json:"groupInfo"`
 	Attachments []signalAttachment `json:"attachments"`
 	Reaction    *signalReaction    `json:"reaction"`
+	Quote       *signalQuote       `json:"quote"`
 }
 
 type signalGroupInfo struct {
@@ -77,6 +84,7 @@ type signalSyncSentMessage struct {
 	GroupInfo   *signalGroupInfo   `json:"groupInfo"`
 	Attachments []signalAttachment `json:"attachments"`
 	Reaction    *signalReaction    `json:"reaction"`
+	Quote       *signalQuote       `json:"quote"`
 }
 
 // signalAttachmentsDir is where signal-cli daemon auto-saves received attachments.
@@ -666,6 +674,16 @@ func handleSignalMessage(env signalEnvelope) {
 		}
 
 		content := msg.Message
+
+		// ── Reply context: prepend quoted message to prompt ──────────────────
+		if msg.Quote != nil {
+			quotedText := msg.Quote.Text
+			if quotedText == "" {
+				quotedText = "(no text)"
+			}
+			content = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quotedText, content)
+		}
+
 		if content == "" && len(msg.Attachments) > 0 {
 			transcript, err := transcribeSignalVoice(msg.Attachments)
 			if err != nil {
@@ -784,6 +802,15 @@ func handleSignalMessage(env signalEnvelope) {
 			})
 		}
 		return
+	}
+
+	// ── Reply context: prepend quoted message to prompt ──────────────────────
+	if env.DataMessage.Quote != nil {
+		quotedText := env.DataMessage.Quote.Text
+		if quotedText == "" {
+			quotedText = "(no text)"
+		}
+		content = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quotedText, content)
 	}
 
 	log.Printf("Signal ← %s (chat=%s): %s", env.Source, chatID, content)
