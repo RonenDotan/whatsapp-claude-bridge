@@ -5,8 +5,8 @@ echo Stopping bridge...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*whatsapp-bridge.exe*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 timeout /t 2 /nobreak >nul
 
-echo Building v0.41.0...
-go build -ldflags "-X main.Version=0.41.0" -o whatsapp-bridge.exe .
+echo Building v0.41.1...
+go build -ldflags "-X main.Version=0.41.1" -o whatsapp-bridge.exe .
 if %ERRORLEVEL% neq 0 (
     echo BUILD FAILED
     exit /b 1
