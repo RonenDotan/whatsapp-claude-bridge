@@ -3,6 +3,16 @@ $component = if ($args.Count -gt 0) { $args[0] } else { 'all' }
 $BRIDGE_DIR = $PSScriptRoot
 $MCP_DIR    = Join-Path $PSScriptRoot '..\whatsapp-mcp-server'
 
+# ─── Signal-CLI update policy (issue #41) ────────────────────────────────────
+# $false (default): locked to $SignalCliPinnedVersion. No GitHub check on start.
+#   Fresh installs download the pinned version and auto-apply the NPE patch.
+#   Change to $true only when you intentionally want to upgrade signal-cli.
+# $true:  check GitHub for a newer release, download if found, then auto-patch.
+#   After a successful upgrade, flip back to $false to lock the new version.
+$SignalCliAutoUpdate    = $false
+$SignalCliPinnedVersion = '0.14.4.1'
+# ─────────────────────────────────────────────────────────────────────────────
+
 if ($component -eq 'help' -or $component -eq '--help') {
     Write-Host 'Usage: start.bat [component]'
     Write-Host ''
@@ -17,25 +27,6 @@ if ($component -eq 'help' -or $component -eq '--help') {
     Write-Host '  whatsapp  whatsapp-mcp-server (python main.py)'
     Write-Host '  bridge    whatsapp-bridge.exe'
     exit 0
-}
-
-# Discover signal-cli - find the newest *-extracted folder in TEMP
-$signalBase = Get-ChildItem $env:TEMP -Directory |
-    Where-Object { $_.Name -like 'signal-cli-*-extracted' } |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-
-if (-not $signalBase) {
-    Write-Error ('Cannot find signal-cli-*-extracted in ' + $env:TEMP)
-    exit 1
-}
-
-$signalCliBat = Get-ChildItem $signalBase.FullName -Recurse -Filter 'signal-cli.bat' |
-    Select-Object -First 1 -ExpandProperty FullName
-
-if (-not $signalCliBat) {
-    Write-Error ('Cannot find signal-cli.bat under ' + $signalBase.FullName)
-    exit 1
 }
 
 function Rotate-LogFile([string]$path, [int]$keepCount = 5) {
@@ -56,14 +47,145 @@ function Kill-ByCommandLine([string]$pattern) {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+# Returns $true if the system Java major version is >= $minMajor
+function Test-JavaVersion([int]$minMajor) {
+    try {
+        $out = (& java --version 2>&1)[0]   # "openjdk 21.0.11 ..."
+        if ($out -match '(\d+)') {
+            return ([int]$Matches[1] -ge $minMajor)
+        }
+    } catch {}
+    return $false
+}
+
+# Download/verify signal-cli in %TEMP%. Behaviour controlled by $SignalCliAutoUpdate:
+#   $false → always use $SignalCliPinnedVersion (no GitHub check)
+#   $true  → check GitHub for latest, download if newer than pinned
+# After any fresh download, Apply-SignalCliPatch is called by Restart-SignalCli.
+# Requires Java 25+.
+function Update-SignalCli {
+    try {
+        if ($SignalCliAutoUpdate) {
+            $release   = Invoke-RestMethod 'https://api.github.com/repos/AsamK/signal-cli/releases/latest'
+            $targetVer = $release.tag_name.TrimStart('v')
+            Write-Host "[UPDATE] signal-cli auto-update enabled; latest is $targetVer"
+        } else {
+            $targetVer = $SignalCliPinnedVersion
+            $release   = Invoke-RestMethod "https://api.github.com/repos/AsamK/signal-cli/releases/tags/v$targetVer"
+        }
+
+        $installDir = Join-Path $env:TEMP "signal-cli-$targetVer-extracted"
+
+        if (Test-Path $installDir) {
+            Write-Host "[OK] signal-cli $targetVer already installed"
+            return
+        }
+
+        # signal-cli >= 0.14.0 requires Java 25+
+        if (-not (Test-JavaVersion 25)) {
+            $javaInfo = try { (& java --version 2>&1)[0] } catch { 'not found' }
+            Write-Warning "[WARN] signal-cli $targetVer requires Java 25+; found: $javaInfo. Keeping current version."
+            return
+        }
+
+        $assetName = "signal-cli-$targetVer.tar.gz"
+        $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+        if (-not $asset) {
+            Write-Warning "[WARN] Asset $assetName not found in release, skipping"
+            return
+        }
+
+        Write-Host "[UPDATE] Downloading signal-cli $targetVer ($assetName)..."
+        $tmpFile = Join-Path $env:TEMP $assetName
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmpFile
+
+        New-Item -ItemType Directory -Path $installDir | Out-Null
+        tar -xzf $tmpFile -C $installDir --strip-components=1
+        Remove-Item $tmpFile -Force
+
+        # Keep only the two most recent extracted versions
+        Get-ChildItem $env:TEMP -Directory |
+            Where-Object { $_.Name -like 'signal-cli-*-extracted' -and $_.FullName -ne $installDir } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip 1 |
+            ForEach-Object {
+                Write-Host "[CLEANUP] Removing old $($_.Name)"
+                Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            }
+
+        Write-Host "[OK] signal-cli $targetVer installed"
+    } catch {
+        Write-Warning "[WARN] signal-cli update check failed: $_. Continuing with existing version."
+    }
+}
+
+# Apply the getServerGuid NPE bytecode patch (issue #41) to the active signal-cli install.
+# Runs _patch_signal_jar.py; script is a no-op if already patched or bug fixed upstream.
+function Apply-SignalCliPatch {
+    $patchScript = Join-Path $BRIDGE_DIR '_patch_signal_jar.py'
+    if (-not (Test-Path $patchScript)) {
+        Write-Warning '[WARN] _patch_signal_jar.py not found — skipping signal-cli patch'
+        return
+    }
+    $installDir = Get-ChildItem $env:TEMP -Directory |
+        Where-Object { $_.Name -like 'signal-cli-*-extracted' } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $installDir) {
+        Write-Warning '[WARN] No signal-cli install found — cannot apply patch'
+        return
+    }
+    $jar = Get-ChildItem (Join-Path $installDir.FullName 'lib') -Filter 'signal-service-java-*.jar' |
+        Select-Object -First 1
+    if (-not $jar) {
+        Write-Warning '[WARN] signal-service-java jar not found — cannot apply patch'
+        return
+    }
+    try {
+        $result = & python $patchScript $jar.FullName 2>&1
+        Write-Host $result
+    } catch {
+        Write-Warning "[WARN] signal-cli patch script failed: $_"
+    }
+}
+
+# Discover signal-cli - find the newest *-extracted folder in TEMP
+function Get-SignalCliBat {
+    $base = Get-ChildItem $env:TEMP -Directory |
+        Where-Object { $_.Name -like 'signal-cli-*-extracted' } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $base) { return $null }
+    return Get-ChildItem $base.FullName -Recurse -Filter 'signal-cli.bat' |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+
 function Restart-SignalCli {
+    Update-SignalCli
+    Apply-SignalCliPatch
+
+    $signalCliBat = Get-SignalCliBat
+    if (-not $signalCliBat) {
+        Write-Error 'Cannot find signal-cli.bat. Install signal-cli or ensure Java 25+ is available.'
+        exit 1
+    }
+
+    # Ensure signal-cli uses Java 25+ (JAVA_HOME may still point to an older JDK)
+    $java25Home = 'C:\Program Files\Eclipse Adoptium\jdk-25.0.3.9-hotspot'
+    if (Test-Path $java25Home) {
+        $env:JAVA_HOME = $java25Home
+    }
+
     Write-Host 'Stopping signal-cli...'
     Kill-ByCommandLine 'signal-cli'
     Rotate-LogFile ($BRIDGE_DIR + '\signal-cli.log')
     Start-Sleep -Milliseconds 800
+    $sigLog = $BRIDGE_DIR + '\signal-cli.log'
     $p = Start-Process -FilePath $signalCliBat `
         -ArgumentList 'daemon --tcp 0.0.0.0:7583' `
-        -WindowStyle Hidden -PassThru
+        -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $sigLog `
+        -RedirectStandardError  ($BRIDGE_DIR + '\signal-cli.err')
     Write-Host ('[OK] signal-cli started (PID ' + $p.Id + ')')
 }
 

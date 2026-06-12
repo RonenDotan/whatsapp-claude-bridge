@@ -508,7 +508,7 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 		return false, fmt.Sprintf("Error sending message: %v", err)
 	}
 	markSentMessage(sendResp.ID)
-	return true, fmt.Sprintf("Message sent to %s", recipient)
+	return true, sendResp.ID
 }
 
 // ─── Media download ───────────────────────────────────────────────────────────
@@ -925,6 +925,23 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		logger.Warnf("Failed to store chat: %v", err)
 	}
 
+	// ── Reaction handling ─────────────────────────────────────────────────────
+	if reaction := msg.Message.GetReactionMessage(); reaction != nil {
+		emoji := reaction.GetText()
+		if emoji == "" || !isAllowedChat(chatJID) {
+			return // un-react or non-monitored chat — ignore
+		}
+		origID := reaction.GetKey().GetID()
+		fmt.Printf("[reaction] %s reacted %s to message %q in chat %q\n", sender, emoji, origID, chatJID)
+		text, found := LookupRecentMessage(chatJID, origID)
+		if !found {
+			sendWhatsAppMessage(client, chatJID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).", "")
+			return
+		}
+		sendWhatsAppMessage(client, chatJID, fmt.Sprintf("🔍 Reaction: %s\nOriginal message: %s", emoji, text), "")
+		return
+	}
+
 	content := extractTextContent(msg.Message)
 
 	if !isAllowedChat(chatJID) {
@@ -941,6 +958,11 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 
 	if content == "" && mediaType == "" {
 		return
+	}
+
+	// Cache text content for reaction lookups
+	if content != "" {
+		StoreRecentMessage(chatJID, msg.Info.ID, content)
 	}
 
 	err := messageStore.StoreMessage(
@@ -1052,7 +1074,8 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 				sendWhatsAppMessage(client, chatJID, cReply, "")
 			} else {
 				go handleWithCodex(chatJID, content, func(reply string) {
-					sendWhatsAppMessage(client, chatJID, reply, "")
+					_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
+					StoreRecentMessage(chatJID, msgID, reply)
 				}, func(path string) {
 					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
 					sendWhatsAppMessage(client, chatJID, "", path)
@@ -1085,7 +1108,8 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 				sendWhatsAppMessage(client, chatJID, reply, "")
 			} else {
 				go handleWithClaude(chatJID, content, func(reply string) {
-					sendWhatsAppMessage(client, chatJID, reply, "")
+					_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
+					StoreRecentMessage(chatJID, msgID, reply)
 				}, func(path string) {
 					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
 					sendWhatsAppMessage(client, chatJID, "", path)
