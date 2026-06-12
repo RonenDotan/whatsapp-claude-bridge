@@ -9,24 +9,8 @@ bridge.log.*
 bridge.err.*
 signal-cli.log.*
 
-# Runtime store data (sessions, personality state, media)
-store/sessions.json
-store/settings.json
-store/codex_sessions.json
-store/chat_personalities.json
-store/allowed_chats.json
-store/codex_allowed_chats.json
-store/signal_allowed_chats.json
-store/signal_codex_allowed_chats.json
-store/*.db
-store/*.db-*
-store/[0-9]*@*.us/
-store/chats/
-
-# WhatsApp device key store
-store/whatsapp.db
-whatsapp.db
-*.db
+# Runtime store (databases only — all other user data lives in bridge-data/ outside the repo)
+store/
 
 # Scratch / temp files written by Claude during dev sessions
 _run.bat

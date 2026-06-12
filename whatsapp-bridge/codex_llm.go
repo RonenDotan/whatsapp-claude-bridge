@@ -79,7 +79,7 @@ func (l *CodexLLM) processWithAttachment(chatID, text string, att *Attachment, r
 	chatDirPath, dirErr := ensureChatDir(chatID)
 	if dirErr != nil {
 		log.Printf("CodexLLM.ProcessWithAttachment: failed to create chat dir for %s: %v", chatID, dirErr)
-		chatDirPath = storeDir()
+		chatDirPath = dataDir()
 	}
 	if abs, err := filepath.Abs(chatDirPath); err == nil {
 		chatDirPath = abs

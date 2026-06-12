@@ -14,13 +14,29 @@ import (
 	"unicode"
 )
 
-// storeDir returns an absolute path to the "store" directory next to the executable.
+// storeDir returns the "store" directory next to the executable.
+// Only whatsapp.db and messages.db live here (fixed location expected by whatsapp-mcp-server).
 func storeDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "store"
 	}
 	return filepath.Join(filepath.Dir(exe), "store")
+}
+
+// dataDir returns the runtime data directory for all user state (sessions, allowed chats,
+// per-chat dirs, etc.). Reads WHATSAPP_BRIDGE_DATA_DIR env var; defaults to a bridge-data/
+// sibling folder next to the bridge directory.
+func dataDir() string {
+	if d := os.Getenv("WHATSAPP_BRIDGE_DATA_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join(filepath.Dir(bridgeDir()), "bridge-data")
+}
+
+// configDir returns the config directory next to the bridge executable (committed to git).
+func configDir() string {
+	return filepath.Join(bridgeDir(), "config")
 }
 
 func sanitizeChatID(chatID string) string {
@@ -33,7 +49,7 @@ func sanitizeChatID(chatID string) string {
 }
 
 func chatDir(chatID string) string {
-	return filepath.Join(storeDir(), "chats", sanitizeChatID(chatID))
+	return filepath.Join(dataDir(), "chats", sanitizeChatID(chatID))
 }
 
 func ensureChatDir(chatID string) (string, error) {
@@ -82,8 +98,8 @@ const codexGroupJID = "120363407895179577@g.us"
 
 var (
 	sessionsMu        sync.Mutex
-	sessionsFile      = filepath.Join(storeDir(), "sessions.json")
-	codexSessionsFile = filepath.Join(storeDir(), "codex_sessions.json")
+	sessionsFile      = filepath.Join(dataDir(), "sessions.json")
+	codexSessionsFile = filepath.Join(dataDir(), "codex_sessions.json")
 )
 
 func loadSessions() map[string]string {
@@ -335,7 +351,7 @@ var (
 // chatCacheFile returns the path to store/chats/<chatID>/message_cache.json,
 // creating the directory if needed.
 func chatCacheFile(chatID string) string {
-	dir := filepath.Join(storeDir(), "chats", chatID)
+	dir := filepath.Join(dataDir(), "chats", chatID)
 	_ = os.MkdirAll(dir, 0o755)
 	return filepath.Join(dir, "message_cache.json")
 }
@@ -468,8 +484,8 @@ func CancelRunning(chatID string) bool {
 // ─── WhatsApp whitelist management ───────────────────────────────────────────
 
 var (
-	allowedChatsFile      = filepath.Join(storeDir(), "allowed_chats.json")
-	codexAllowedChatsFile = filepath.Join(storeDir(), "codex_allowed_chats.json")
+	allowedChatsFile      = filepath.Join(dataDir(), "allowed_chats.json")
+	codexAllowedChatsFile = filepath.Join(dataDir(), "codex_allowed_chats.json")
 	allowedChats          map[string]struct{}
 	allowedChatsMu        sync.RWMutex
 	codexAllowedChats     map[string]struct{}
@@ -513,7 +529,7 @@ func isCodexChat(jid string) bool {
 }
 
 func initAllowedChats() {
-	dir := storeDir()
+	dir := dataDir()
 	os.MkdirAll(dir, 0755)
 	if _, err := os.Stat(allowedChatsFile); os.IsNotExist(err) {
 		data, _ := json.MarshalIndent([]string{defaultAllowedChat}, "", "  ")
@@ -555,7 +571,7 @@ func loadCodexAllowedChats() map[string]struct{} {
 }
 
 func initCodexAllowedChats() {
-	dir := storeDir()
+	dir := dataDir()
 	os.MkdirAll(dir, 0755)
 	if _, err := os.Stat(codexAllowedChatsFile); os.IsNotExist(err) {
 		data, _ := json.MarshalIndent([]string{codexGroupJID}, "", "  ")
@@ -583,7 +599,7 @@ func saveCodexAllowedChats() error {
 // ─── Signal whitelist management ─────────────────────────────────────────────
 
 var (
-	signalAllowedChatsFile = filepath.Join(storeDir(), "signal_allowed_chats.json")
+	signalAllowedChatsFile = filepath.Join(dataDir(), "signal_allowed_chats.json")
 	signalAllowedChats     map[string]struct{}
 	signalAllowedChatsMu   sync.RWMutex
 )
@@ -605,7 +621,7 @@ func loadSignalAllowedChats() map[string]struct{} {
 }
 
 func initSignalAllowedChats() {
-	os.MkdirAll(storeDir(), 0755)
+	os.MkdirAll(dataDir(), 0755)
 	signalAllowedChatsMu.Lock()
 	signalAllowedChats = loadSignalAllowedChats()
 	signalAllowedChatsMu.Unlock()
@@ -639,7 +655,7 @@ func isSignalAllowedChat(id string) bool {
 }
 
 var (
-	signalCodexAllowedChatsFile = filepath.Join(storeDir(), "signal_codex_allowed_chats.json")
+	signalCodexAllowedChatsFile = filepath.Join(dataDir(), "signal_codex_allowed_chats.json")
 	signalCodexAllowedChats     map[string]struct{}
 	signalCodexAllowedChatsMu   sync.RWMutex
 )
@@ -661,7 +677,7 @@ func loadSignalCodexAllowedChats() map[string]struct{} {
 }
 
 func initSignalCodexAllowedChats() {
-	os.MkdirAll(storeDir(), 0755)
+	os.MkdirAll(dataDir(), 0755)
 	signalCodexAllowedChatsMu.Lock()
 	signalCodexAllowedChats = loadSignalCodexAllowedChats()
 	signalCodexAllowedChatsMu.Unlock()
@@ -772,11 +788,11 @@ func parseCodexJSONL(output string) (sessionID string, inputTokens, outputTokens
 
 // ─── Reaction prompt lookup ───────────────────────────────────────────────────
 
-// lookupReactionPrompt loads store/reaction_prompts.json and returns the prompt
+// lookupReactionPrompt loads config/reaction_prompts.json and returns the prompt
 // for the given emoji with {text} substituted. Falls back to a generic prompt
 // if the emoji is not in the map or the file cannot be read.
 func lookupReactionPrompt(emoji, text string) string {
-	path := filepath.Join(storeDir(), "reaction_prompts.json")
+	path := filepath.Join(configDir(), "reaction_prompts.json")
 	data, err := os.ReadFile(path)
 	if err == nil {
 		var m map[string]string
@@ -817,7 +833,7 @@ func handleWithClaude(chatID, messageText string, sendFn func(string), sendMedia
 	chatDirPath, dirErr := ensureChatDir(chatID)
 	if dirErr != nil {
 		log.Printf("handleWithClaude: failed to create chat dir for %s: %v", chatID, dirErr)
-		chatDirPath = storeDir()
+		chatDirPath = dataDir()
 	}
 	if abs, err := filepath.Abs(chatDirPath); err == nil {
 		chatDirPath = abs

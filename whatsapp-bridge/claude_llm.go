@@ -49,7 +49,7 @@ func (l *ClaudeLLM) ProcessWithAttachment(chatID, text string, att *Attachment) 
 	chatDirPath, dirErr := ensureChatDir(chatID)
 	if dirErr != nil {
 		log.Printf("ClaudeLLM.ProcessWithAttachment: failed to create chat dir for %s: %v", chatID, dirErr)
-		chatDirPath = storeDir()
+		chatDirPath = dataDir()
 	}
 	if abs, err := filepath.Abs(chatDirPath); err == nil {
 		chatDirPath = abs

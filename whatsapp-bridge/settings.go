@@ -12,7 +12,7 @@ type Settings struct {
 }
 
 func loadSettings() Settings {
-	data, err := os.ReadFile(filepath.Join(storeDir(), "settings.json"))
+	data, err := os.ReadFile(filepath.Join(dataDir(), "settings.json"))
 	if err != nil {
 		return Settings{WhatsAppEnabled: true, SignalEnabled: true}
 	}

@@ -3,6 +3,12 @@ $component = if ($args.Count -gt 0) { $args[0] } else { 'all' }
 $BRIDGE_DIR = $PSScriptRoot
 $MCP_DIR    = Join-Path $PSScriptRoot '..\whatsapp-mcp-server'
 
+# ─── Data directory ───────────────────────────────────────────────────────────
+if (-not $env:WHATSAPP_BRIDGE_DATA_DIR) {
+    $env:WHATSAPP_BRIDGE_DATA_DIR = Join-Path (Split-Path $BRIDGE_DIR -Parent) 'bridge-data'
+}
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ─── Signal-CLI update policy (issue #41) ────────────────────────────────────
 # $false (default): locked to $SignalCliPinnedVersion. No GitHub check on start.
 #   Fresh installs download the pinned version and auto-apply the NPE patch.

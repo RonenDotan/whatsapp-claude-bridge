@@ -6,8 +6,21 @@ param(
 
 $BRIDGE_DIR = $PSScriptRoot
 $MCP_DIR    = Join-Path $PSScriptRoot '..\whatsapp-mcp-server'
-$STORE_DIR           = Join-Path $BRIDGE_DIR 'store'
-$SETTINGS_FILE       = Join-Path $STORE_DIR  'settings.json'
+
+# ─── Data directory ───────────────────────────────────────────────────────────
+# User state (sessions, allowed chats, per-chat data) lives here — outside the repo.
+# Default: bridge-data/ sibling to the bridge directory.
+# Override: set WHATSAPP_BRIDGE_DATA_DIR before running install or start.
+if (-not $env:WHATSAPP_BRIDGE_DATA_DIR) {
+    $env:WHATSAPP_BRIDGE_DATA_DIR = Join-Path (Split-Path $BRIDGE_DIR -Parent) 'bridge-data'
+    [System.Environment]::SetEnvironmentVariable('WHATSAPP_BRIDGE_DATA_DIR', $env:WHATSAPP_BRIDGE_DATA_DIR, 'User')
+    Write-Host "[OK]  WHATSAPP_BRIDGE_DATA_DIR set to: $env:WHATSAPP_BRIDGE_DATA_DIR"
+}
+$DATA_DIR = $env:WHATSAPP_BRIDGE_DATA_DIR
+if (-not (Test-Path $DATA_DIR)) { New-Item -ItemType Directory -Path $DATA_DIR -Force | Out-Null }
+
+$STORE_DIR     = Join-Path $BRIDGE_DIR 'store'
+$SETTINGS_FILE = Join-Path $DATA_DIR   'settings.json'
 
 function Get-BridgeSettings {
     if (Test-Path $SETTINGS_FILE) {
@@ -19,7 +32,7 @@ function Get-BridgeSettings {
 function Set-BridgeSetting([string]$Key, $Value) {
     $s = Get-BridgeSettings
     $s | Add-Member -NotePropertyName $Key -NotePropertyValue $Value -Force
-    if (-not (Test-Path $STORE_DIR)) { New-Item -ItemType Directory -Path $STORE_DIR -Force | Out-Null }
+    if (-not (Test-Path $DATA_DIR)) { New-Item -ItemType Directory -Path $DATA_DIR -Force | Out-Null }
     $s | ConvertTo-Json -Depth 5 | Set-Content $SETTINGS_FILE -Encoding UTF8
 }
 

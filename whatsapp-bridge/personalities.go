@@ -1,31 +1,35 @@
 package main
 
 import (
-	_ "embed"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 )
 
-//go:embed store/templates/kids.md
-var kidsTpl string
+var personalityPrompts map[string]string
 
-//go:embed store/templates/pro.md
-var proTpl string
+func init() {
+	personalityPrompts = loadPersonalityTemplates()
+}
 
-//go:embed store/templates/creative.md
-var creativeTpl string
-
-//go:embed store/templates/default.md
-var defaultTpl string
-
-var personalityPrompts = map[string]string{
-	"kids":     kidsTpl,
-	"pro":      proTpl,
-	"creative": creativeTpl,
-	"default":  defaultTpl,
+// loadPersonalityTemplates reads personality templates from config/templates/.
+func loadPersonalityTemplates() map[string]string {
+	dir := filepath.Join(configDir(), "templates")
+	presets := []string{"kids", "pro", "creative", "default"}
+	m := make(map[string]string, len(presets))
+	for _, name := range presets {
+		data, err := os.ReadFile(filepath.Join(dir, name+".md"))
+		if err != nil {
+			log.Printf("personalities: could not load template %s: %v", name, err)
+			m[name] = ""
+			continue
+		}
+		m[name] = string(data)
+	}
+	return m
 }
 
 // WhisperConfig holds per-chat Whisper transcription overrides.
@@ -45,7 +49,7 @@ var personalityWhisper = map[string]*WhisperConfig{
 
 var (
 	personalitiesMu   sync.RWMutex
-	personalitiesFile = filepath.Join(storeDir(), "chat_personalities.json")
+	personalitiesFile = filepath.Join(dataDir(), "chat_personalities.json")
 	chatPersonalities map[string]string
 )
 
