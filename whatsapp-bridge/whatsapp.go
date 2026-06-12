@@ -812,7 +812,16 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			"!cancel — cancel the currently running request\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
 			"!stats — show token usage and cost for this session\n"+
-			"!help — show this help screen", "")
+			"!help — show this help screen\n"+
+			"\nReactions (react to any message):\n"+
+			"🔊🔈📢🔉🗣️📣🎤🎙️🎧 — read aloud and save as mp3\n"+
+			"📝 — summarize\n"+
+			"🔥 — expand with more detail\n"+
+			"❓ — explain in simple terms\n"+
+			"🌍 — translate to English\n"+
+			"🇮🇱 — translate to Hebrew\n"+
+			"✅ — extract action items\n"+
+			"(any other emoji) — send reaction context to the LLM", "")
 	case "!cancel":
 		if CancelRunning(chatJID) {
 			sendWhatsAppMessage(client, chatJID, "🛑 Cancelled.", "")
@@ -938,7 +947,22 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			sendWhatsAppMessage(client, chatJID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).", "")
 			return
 		}
-		sendWhatsAppMessage(client, chatJID, fmt.Sprintf("🔍 Reaction: %s\nOriginal message: %s", emoji, text), "")
+		prompt := lookupReactionPrompt(emoji, text)
+		if isCodexChat(chatJID) {
+			go handleWithCodex(chatJID, prompt, func(reply string) {
+				_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
+				StoreRecentMessage(chatJID, msgID, reply)
+			}, func(path string) {
+				sendWhatsAppMessage(client, chatJID, "", path)
+			})
+		} else {
+			go handleWithClaude(chatJID, prompt, func(reply string) {
+				_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
+				StoreRecentMessage(chatJID, msgID, reply)
+			}, func(path string) {
+				sendWhatsAppMessage(client, chatJID, "", path)
+			})
+		}
 		return
 	}
 
