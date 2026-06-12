@@ -770,6 +770,25 @@ func parseCodexJSONL(output string) (sessionID string, inputTokens, outputTokens
 	return
 }
 
+// ─── Reaction prompt lookup ───────────────────────────────────────────────────
+
+// lookupReactionPrompt loads store/reaction_prompts.json and returns the prompt
+// for the given emoji with {text} substituted. Falls back to a generic prompt
+// if the emoji is not in the map or the file cannot be read.
+func lookupReactionPrompt(emoji, text string) string {
+	path := filepath.Join(storeDir(), "reaction_prompts.json")
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var m map[string]string
+		if json.Unmarshal(data, &m) == nil {
+			if tmpl, ok := m[emoji]; ok {
+				return strings.ReplaceAll(tmpl, "{text}", text)
+			}
+		}
+	}
+	return fmt.Sprintf("User reacted with %s to your message:\n\n%s", emoji, text)
+}
+
 // ─── Claude dispatch ──────────────────────────────────────────────────────────
 
 // handleWithClaude calls the Claude CLI and delivers the reply via sendFn.

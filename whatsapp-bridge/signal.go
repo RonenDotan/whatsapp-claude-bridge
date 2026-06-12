@@ -633,7 +633,26 @@ func handleSignalMessage(env signalEnvelope) {
 				sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
 				return
 			}
-			sendSignalMessage(chatID, fmt.Sprintf("🔍 Reaction: %s\nOriginal message: %s", r.Emoji, text))
+			prompt := lookupReactionPrompt(r.Emoji, text)
+			if isSignalCodexChat(chatID) {
+				go handleWithCodex(chatID, prompt, func(reply string) {
+					ts := sendSignalMessage(chatID, reply)
+					if ts != 0 {
+						StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+					}
+				}, func(path string) {
+					sendSignalFile(chatID, path)
+				})
+			} else {
+				go handleWithClaude(chatID, prompt, func(reply string) {
+					ts := sendSignalMessage(chatID, reply)
+					if ts != 0 {
+						StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+					}
+				}, func(path string) {
+					sendSignalFile(chatID, path)
+				})
+			}
 			return
 		}
 
@@ -735,7 +754,26 @@ func handleSignalMessage(env signalEnvelope) {
 			sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
 			return
 		}
-		sendSignalMessage(chatID, fmt.Sprintf("🔍 Reaction: %s\nOriginal message: %s", r.Emoji, text))
+		prompt := lookupReactionPrompt(r.Emoji, text)
+		if isSignalCodexChat(chatID) {
+			go handleWithCodex(chatID, prompt, func(reply string) {
+				ts := sendSignalMessage(chatID, reply)
+				if ts != 0 {
+					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+				}
+			}, func(path string) {
+				sendSignalFile(chatID, path)
+			})
+		} else {
+			go handleWithClaude(chatID, prompt, func(reply string) {
+				ts := sendSignalMessage(chatID, reply)
+				if ts != 0 {
+					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+				}
+			}, func(path string) {
+				sendSignalFile(chatID, path)
+			})
+		}
 		return
 	}
 

@@ -938,7 +938,22 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			sendWhatsAppMessage(client, chatJID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).", "")
 			return
 		}
-		sendWhatsAppMessage(client, chatJID, fmt.Sprintf("🔍 Reaction: %s\nOriginal message: %s", emoji, text), "")
+		prompt := lookupReactionPrompt(emoji, text)
+		if isCodexChat(chatJID) {
+			go handleWithCodex(chatJID, prompt, func(reply string) {
+				_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
+				StoreRecentMessage(chatJID, msgID, reply)
+			}, func(path string) {
+				sendWhatsAppMessage(client, chatJID, "", path)
+			})
+		} else {
+			go handleWithClaude(chatJID, prompt, func(reply string) {
+				_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
+				StoreRecentMessage(chatJID, msgID, reply)
+			}, func(path string) {
+				sendWhatsAppMessage(client, chatJID, "", path)
+			})
+		}
 		return
 	}
 
