@@ -812,7 +812,16 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 			"!cancel — cancel the currently running request\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
 			"!stats — show token usage and cost for this session\n"+
-			"!help — show this help screen", "")
+			"!help — show this help screen\n"+
+			"\nReactions (react to any message):\n"+
+			"🔊🔈📢🔉🗣️📣🎤🎙️🎧 — read aloud and save as mp3\n"+
+			"📝 — summarize\n"+
+			"🔥 — expand with more detail\n"+
+			"❓ — explain in simple terms\n"+
+			"🌍 — translate to English\n"+
+			"🇮🇱 — translate to Hebrew\n"+
+			"✅ — extract action items\n"+
+			"(any other emoji) — send reaction context to the LLM", "")
 	case "!cancel":
 		if CancelRunning(chatJID) {
 			sendWhatsAppMessage(client, chatJID, "🛑 Cancelled.", "")

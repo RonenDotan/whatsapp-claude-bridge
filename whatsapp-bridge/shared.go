@@ -978,10 +978,17 @@ func handleWithCodex(chatID, messageText string, sendFn func(string), sendMediaF
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("codex_reply_%d.txt", time.Now().UnixNano()))
 	defer os.Remove(tmpFile)
 
+	// Codex receives the message as a CLI argument (not stdin like Claude).
+	// On Windows, embedded newlines in a Node.js CLI argument get truncated,
+	// so collapse them to spaces to ensure the full text reaches Codex.
+	codexMessage := strings.ReplaceAll(messageText, "\r\n", " ")
+	codexMessage = strings.ReplaceAll(codexMessage, "\n", " ")
+	codexMessage = strings.TrimSpace(codexMessage)
+
 	var args []string
 	if sessionID != "" {
 		args = []string{"exec", "--json", "--output-last-message", tmpFile,
-			"resume", sessionID, messageText}
+			"resume", sessionID, codexMessage}
 	} else {
 		args = []string{"exec",
 			"--json",
@@ -989,7 +996,7 @@ func handleWithCodex(chatID, messageText string, sendFn func(string), sendMediaF
 			"--skip-git-repo-check",
 			"--dangerously-bypass-approvals-and-sandbox",
 			"-s", "workspace-write",
-			messageText}
+			codexMessage}
 	}
 
 	chatDirPath, dirErr := ensureChatDir(chatID)
