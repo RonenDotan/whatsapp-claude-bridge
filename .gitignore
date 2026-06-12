@@ -5,6 +5,9 @@ claude_desktop_config.json
 whatsapp.log
 logs/
 
+# Bridge runtime user data (lives outside the repo by design)
+bridge-data/
+
 # Scratch / temp files written by Claude during dev sessions
 _*.bat
 _*.txt
