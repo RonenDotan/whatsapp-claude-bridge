@@ -307,21 +307,75 @@ func transcribeAudio(filePath string) (string, error) {
 }
 
 // ─── Recent message cache (for reaction lookups) ─────────────────────────────
+//
+// Two-tier design:
+//   Tier 1 (hot)  — in-memory, last 20 messages per chat. Fast O(n) scan.
+//   Tier 2 (cold) — file-backed, last 500 messages per chat.
+//                   Persists across bridge restarts and survives cache eviction.
+//                   File: store/chats/<chatID>/message_cache.json
+//                   Lazy-loaded on first access per chat per session.
 
-const recentMessageCacheSize = 20
+const (
+	recentMessageCacheSize = 20
+	persistedCacheSize     = 500
+)
 
 type cachedMessage struct {
-	ID   string
-	Text string
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 var (
-	recentMsgMu    sync.Mutex
-	recentMsgCache = map[string][]cachedMessage{} // chatID -> last N messages
+	recentMsgMu     sync.Mutex
+	recentMsgCache  = map[string][]cachedMessage{} // chatID -> last 20 (hot)
+	fileMsgCache    = map[string][]cachedMessage{} // chatID -> last 500 (cold, persisted)
+	fileCacheLoaded = map[string]bool{}             // true once file loaded for chatID
 )
 
-// StoreRecentMessage saves a message ID+text for a chat, evicting the oldest if at capacity.
-// Only call for real user/LLM text — not bridge commands or system responses.
+// chatCacheFile returns the path to store/chats/<chatID>/message_cache.json,
+// creating the directory if needed.
+func chatCacheFile(chatID string) string {
+	dir := filepath.Join(storeDir(), "chats", chatID)
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "message_cache.json")
+}
+
+// ensureFileCacheLoaded loads the persisted cache from disk the first time a
+// chatID is accessed. Must be called with recentMsgMu held.
+func ensureFileCacheLoaded(chatID string) {
+	if fileCacheLoaded[chatID] {
+		return
+	}
+	fileCacheLoaded[chatID] = true
+	data, err := os.ReadFile(chatCacheFile(chatID))
+	if err != nil {
+		fileMsgCache[chatID] = []cachedMessage{}
+		return
+	}
+	var msgs []cachedMessage
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		log.Printf("[cache] parse error for %s: %v", chatID, err)
+		fileMsgCache[chatID] = []cachedMessage{}
+		return
+	}
+	fileMsgCache[chatID] = msgs
+	log.Printf("[cache] loaded %d persisted messages for chat %s", len(msgs), chatID)
+}
+
+// writeCacheFile persists msgs to disk. Must be called with recentMsgMu held.
+func writeCacheFile(chatID string, msgs []cachedMessage) {
+	data, err := json.Marshal(msgs)
+	if err != nil {
+		log.Printf("[cache] marshal error for %s: %v", chatID, err)
+		return
+	}
+	if err := os.WriteFile(chatCacheFile(chatID), data, 0o644); err != nil {
+		log.Printf("[cache] write error for %s: %v", chatID, err)
+	}
+}
+
+// StoreRecentMessage saves a message to both the hot in-memory cache and the
+// persistent file cache. Only call for real user/LLM text, not system responses.
 func StoreRecentMessage(chatID, msgID, text string) {
 	if text == "" || msgID == "" {
 		return
@@ -329,19 +383,42 @@ func StoreRecentMessage(chatID, msgID, text string) {
 	recentMsgMu.Lock()
 	defer recentMsgMu.Unlock()
 	log.Printf("[cache] store chat=%s msgID=%q text=%q", chatID, msgID, text)
-	msgs := recentMsgCache[chatID]
-	msgs = append(msgs, cachedMessage{ID: msgID, Text: text})
-	if len(msgs) > recentMessageCacheSize {
-		msgs = msgs[len(msgs)-recentMessageCacheSize:]
+
+	// Tier 1: hot in-memory cache (last 20)
+	hot := recentMsgCache[chatID]
+	hot = append(hot, cachedMessage{ID: msgID, Text: text})
+	if len(hot) > recentMessageCacheSize {
+		hot = hot[len(hot)-recentMessageCacheSize:]
 	}
-	recentMsgCache[chatID] = msgs
+	recentMsgCache[chatID] = hot
+
+	// Tier 2: persisted file cache (last 500)
+	ensureFileCacheLoaded(chatID)
+	cold := fileMsgCache[chatID]
+	cold = append(cold, cachedMessage{ID: msgID, Text: text})
+	if len(cold) > persistedCacheSize {
+		cold = cold[len(cold)-persistedCacheSize:]
+	}
+	fileMsgCache[chatID] = cold
+	writeCacheFile(chatID, cold)
 }
 
-// LookupRecentMessage finds a message by ID in the per-chat cache.
+// LookupRecentMessage finds a message by ID. Checks hot cache first, then the
+// persisted file cache (loaded lazily on first miss per chat per session).
 func LookupRecentMessage(chatID, msgID string) (string, bool) {
 	recentMsgMu.Lock()
 	defer recentMsgMu.Unlock()
+
+	// Tier 1: hot cache
 	for _, m := range recentMsgCache[chatID] {
+		if m.ID == msgID {
+			return m.Text, true
+		}
+	}
+
+	// Tier 2: persisted cache
+	ensureFileCacheLoaded(chatID)
+	for _, m := range fileMsgCache[chatID] {
 		if m.ID == msgID {
 			return m.Text, true
 		}
