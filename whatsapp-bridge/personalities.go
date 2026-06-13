@@ -17,7 +17,7 @@ func init() {
 
 // loadPersonalityTemplates reads personality templates from config/templates/.
 func loadPersonalityTemplates() map[string]string {
-	dir := filepath.Join(configDir(), "templates")
+	dir := filepath.Join(configDir(), "templates", "personalities")
 	presets := []string{"kids", "pro", "creative", "default"}
 	m := make(map[string]string, len(presets))
 	for _, name := range presets {

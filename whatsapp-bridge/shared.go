@@ -80,7 +80,7 @@ func ensureChatClaudeSettings(chatID string) {
 	if _, err := os.Stat(target); err == nil {
 		return // already exists — don't overwrite custom settings
 	}
-	tmpl := filepath.Join(bridgeDir(), ".claude", "templates", "settings.local.json")
+	tmpl := filepath.Join(configDir(), "templates", "settings", "settings.local.json")
 	data, err := os.ReadFile(tmpl)
 	if err != nil {
 		log.Printf("ensureChatClaudeSettings: template not found at %s: %v", tmpl, err)
