@@ -16,6 +16,7 @@ func main() {
 		os.Exit(0)
 	}
 
+	core.BridgeVersion = Version
 	settings := core.LoadSettings()
 	log.Printf("Starting bridge: WhatsApp=%v Signal=%v", settings.WhatsAppEnabled, settings.SignalEnabled)
 

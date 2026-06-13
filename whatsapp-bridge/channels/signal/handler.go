@@ -409,7 +409,7 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 	isPersonality := strings.HasPrefix(cmd, "!set-personality")
 	isIcon := strings.HasPrefix(cmd, "!set-icon")
 	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session", "!cancel":
+	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session", "!cancel", "!version":
 	default:
 		if !isPersonality && !isIcon {
 			return false
@@ -430,6 +430,7 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			"!cancel — cancel the currently running request\n"+
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
 			"!stats — show token usage and cost for this session\n"+
+			"!version — show bridge version\n"+
 			"!help — show this help screen\n"+
 			"\nReactions (react to any message):\n"+
 			"🔊🔈📢🔉🗣️📣🎤🎙️🎧 — read aloud and save as mp3\n"+
@@ -440,6 +441,8 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 			"🇮🇱 — translate to Hebrew\n"+
 			"✅ — extract action items\n"+
 			"(any other emoji) — send reaction context to the LLM")
+	case "!version":
+		sendSignalMessage(chatID, "Bridge version: "+core.BridgeVersion)
 	case "!cancel":
 		if core.CancelRunning(chatID) {
 			sendSignalMessage(chatID, "🛑 Cancelled.")
