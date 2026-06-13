@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"encoding/json"
@@ -15,9 +15,8 @@ func init() {
 	personalityPrompts = loadPersonalityTemplates()
 }
 
-// loadPersonalityTemplates reads personality templates from config/templates/.
 func loadPersonalityTemplates() map[string]string {
-	dir := filepath.Join(configDir(), "templates", "personalities")
+	dir := filepath.Join(ConfigDir(), "templates", "personalities")
 	presets := []string{"kids", "pro", "creative", "default"}
 	m := make(map[string]string, len(presets))
 	for _, name := range presets {
@@ -38,8 +37,6 @@ type WhisperConfig struct {
 	InitialPrompt string `json:"initial_prompt"`
 }
 
-// personalityWhisper maps preset names to optional Whisper config overrides.
-// Presets not listed here use no override (nil).
 var personalityWhisper = map[string]*WhisperConfig{
 	"kids": {
 		Language:      "he",
@@ -49,7 +46,7 @@ var personalityWhisper = map[string]*WhisperConfig{
 
 var (
 	personalitiesMu   sync.RWMutex
-	personalitiesFile = filepath.Join(dataDir(), "chat_personalities.json")
+	personalitiesFile = filepath.Join(DataDir(), "chat_personalities.json")
 	chatPersonalities map[string]string
 )
 
@@ -65,7 +62,7 @@ func loadChatPersonalities() map[string]string {
 	return m
 }
 
-func initChatPersonalities() {
+func InitChatPersonalities() {
 	personalitiesMu.Lock()
 	chatPersonalities = loadChatPersonalities()
 	personalitiesMu.Unlock()
@@ -81,7 +78,7 @@ func saveChatPersonalities() error {
 	return os.WriteFile(personalitiesFile, data, 0644)
 }
 
-func getChatPersonality(chatID string) string {
+func GetChatPersonality(chatID string) string {
 	personalitiesMu.RLock()
 	defer personalitiesMu.RUnlock()
 	if p, ok := chatPersonalities[chatID]; ok {
@@ -90,29 +87,27 @@ func getChatPersonality(chatID string) string {
 	return "default"
 }
 
-func setChatPersonality(chatID, preset string) error {
+func SetChatPersonality(chatID, preset string) error {
 	personalitiesMu.Lock()
 	chatPersonalities[chatID] = preset
 	personalitiesMu.Unlock()
 	if err := saveChatPersonalities(); err != nil {
 		return err
 	}
-	if err := saveWhisperPrompt(chatID, preset); err != nil {
+	if err := SaveWhisperPrompt(chatID, preset); err != nil {
 		return err
 	}
-	return writePersonalityContextFile(chatID, preset)
+	return WritePersonalityContextFile(chatID, preset)
 }
 
-// writePersonalityContextFile writes the personality prompt to CLAUDE.md or AGENTS.md
-// in the chat dir, preserving any existing !set-icon line.
-func writePersonalityContextFile(chatID, preset string) error {
-	dir, err := ensureChatDir(chatID)
+func WritePersonalityContextFile(chatID, preset string) error {
+	dir, err := EnsureChatDir(chatID)
 	if err != nil {
 		return err
 	}
 	prompt := strings.TrimRight(personalityPrompts[preset], "\n")
 	filename := "CLAUDE.md"
-	if isCodexChat(chatID) || isSignalCodexChat(chatID) {
+	if IsCodexChat(chatID) || IsSignalCodexChat(chatID) {
 		filename = "AGENTS.md"
 	}
 	filePath := filepath.Join(dir, filename)
@@ -149,7 +144,6 @@ func extractIconLine(content string) string {
 	return ""
 }
 
-// upsertContextFileLine replaces the first line starting with linePrefix, or appends newLine.
 func upsertContextFileLine(filePath, linePrefix, newLine string) error {
 	data, _ := os.ReadFile(filePath)
 	content := string(data)
@@ -179,9 +173,8 @@ func upsertContextFileLine(filePath, linePrefix, newLine string) error {
 	return os.WriteFile(filePath, []byte(result), 0644)
 }
 
-// setIconForChat writes/updates the icon instruction in the appropriate context file.
-func setIconForChat(chatID, emoji string) error {
-	dir, err := ensureChatDir(chatID)
+func SetIconForChat(chatID, emoji string) error {
+	dir, err := EnsureChatDir(chatID)
 	if err != nil {
 		return err
 	}
@@ -189,11 +182,10 @@ func setIconForChat(chatID, emoji string) error {
 	const oldPrefix = "Always start every response with the emoji "
 	newLine := newPrefix + emoji + " emoji. This is mandatory. Never skip it."
 	filename := "CLAUDE.md"
-	if isCodexChat(chatID) || isSignalCodexChat(chatID) {
+	if IsCodexChat(chatID) || IsSignalCodexChat(chatID) {
 		filename = "AGENTS.md"
 	}
 	filePath := filepath.Join(dir, filename)
-	// Remove any legacy icon lines before upserting new format.
 	if data, readErr := os.ReadFile(filePath); readErr == nil {
 		lines := strings.Split(string(data), "\n")
 		var filtered []string
@@ -207,10 +199,9 @@ func setIconForChat(chatID, emoji string) error {
 	return upsertContextFileLine(filePath, newPrefix, newLine)
 }
 
-// saveWhisperPrompt writes or removes whisper_prompt.json in the chat's dir.
-func saveWhisperPrompt(chatID, preset string) error {
+func SaveWhisperPrompt(chatID, preset string) error {
 	cfg, ok := personalityWhisper[preset]
-	dir, err := ensureChatDir(chatID)
+	dir, err := EnsureChatDir(chatID)
 	if err != nil {
 		return err
 	}
@@ -226,10 +217,8 @@ func saveWhisperPrompt(chatID, preset string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// getWhisperConfigForChat reads whisper_prompt.json from the chat's dir.
-// Returns nil if not present or unreadable.
-func getWhisperConfigForChat(chatID string) *WhisperConfig {
-	dir := chatDir(chatID)
+func GetWhisperConfigForChat(chatID string) *WhisperConfig {
+	dir := ChatDir(chatID)
 	data, err := os.ReadFile(filepath.Join(dir, "whisper_prompt.json"))
 	if err != nil {
 		return nil
@@ -241,8 +230,6 @@ func getWhisperConfigForChat(chatID string) *WhisperConfig {
 	return &cfg
 }
 
-// getPersonalityPrompt returns the system prompt for the chat's personality preset,
-// or "" if the preset is "default" or unset.
-func getPersonalityPrompt(chatID string) string {
-	return personalityPrompts[getChatPersonality(chatID)]
+func GetPersonalityPrompt(chatID string) string {
+	return personalityPrompts[GetChatPersonality(chatID)]
 }

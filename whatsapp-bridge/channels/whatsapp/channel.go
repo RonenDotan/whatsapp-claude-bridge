@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"context"
@@ -11,6 +11,8 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
+
+	"whatsapp-client/core"
 )
 
 // WhatsAppChannel implements Channel for the WhatsApp platform.
@@ -31,7 +33,7 @@ func (c *WhatsAppChannel) ID() string { return "whatsapp" }
 // When msg.RawData is a *waProto.Message, it downloads directly from the
 // proto (bypassing DB URL lookup which can 403 on CDN auth changes).
 // Returns (nil, nil) for audio (handled by Whisper) or unsupported types.
-func (c *WhatsAppChannel) ReceiveAttachment(msg IncomingMessage) (*Attachment, error) {
+func (c *WhatsAppChannel) ReceiveAttachment(msg core.IncomingMessage) (*core.Attachment, error) {
 	// Fast path: download directly from the proto message to avoid 403s
 	if protoMsg, ok := msg.RawData.(*waProto.Message); ok && protoMsg != nil {
 		return c.downloadFromProto(protoMsg, msg.ChatID, msg.Text)
@@ -48,7 +50,7 @@ func (c *WhatsAppChannel) ReceiveAttachment(msg IncomingMessage) (*Attachment, e
 	if !ok || mediaType == "audio" {
 		return nil, nil
 	}
-	return &Attachment{
+	return &core.Attachment{
 		LocalPath: localPath,
 		MimeType:  whatsAppMediaTypeToMime(mediaType),
 		Caption:   msg.Text,
@@ -57,7 +59,7 @@ func (c *WhatsAppChannel) ReceiveAttachment(msg IncomingMessage) (*Attachment, e
 
 // downloadFromProto downloads the media directly from the WhatsApp proto
 // message using whatsmeow's DownloadAny, which uses proper authenticated CDN.
-func (c *WhatsAppChannel) downloadFromProto(protoMsg *waProto.Message, chatID, caption string) (*Attachment, error) {
+func (c *WhatsAppChannel) downloadFromProto(protoMsg *waProto.Message, chatID, caption string) (*core.Attachment, error) {
 	// Determine media type and MIME
 	var mediaType, mimeType string
 	switch {
@@ -99,7 +101,7 @@ func (c *WhatsAppChannel) downloadFromProto(protoMsg *waProto.Message, chatID, c
 	absPath, _ := filepath.Abs(localPath)
 	log.Printf("Downloaded %s via DownloadAny to %s (%d bytes)", mediaType, absPath, len(data))
 
-	return &Attachment{
+	return &core.Attachment{
 		LocalPath: absPath,
 		MimeType:  mimeType,
 		Caption:   caption,
@@ -141,4 +143,4 @@ func whatsAppMediaTypeToMime(mediaType string) string {
 }
 
 // compile-time interface check
-var _ Channel = (*WhatsAppChannel)(nil)
+var _ core.Channel = (*WhatsAppChannel)(nil)

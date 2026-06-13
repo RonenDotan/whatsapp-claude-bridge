@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	"whatsapp-client/channels/signal"
+	"whatsapp-client/channels/whatsapp"
+	"whatsapp-client/core"
 )
 
 func main() {
@@ -12,21 +16,21 @@ func main() {
 		os.Exit(0)
 	}
 
-	settings := loadSettings()
+	settings := core.LoadSettings()
 	log.Printf("Starting bridge: WhatsApp=%v Signal=%v", settings.WhatsAppEnabled, settings.SignalEnabled)
 
-	initAllowedChats()
-	initCodexAllowedChats()
-	initSignalAllowedChats()
-	initSignalCodexAllowedChats()
-	initChatPersonalities()
+	core.InitAllowedChats()
+	core.InitCodexAllowedChats()
+	core.InitSignalAllowedChats()
+	core.InitSignalCodexAllowedChats()
+	core.InitChatPersonalities()
 
 	if settings.WhatsAppEnabled {
-		go startWhatsApp()
+		go whatsapp.Start()
 	}
 	if settings.SignalEnabled {
-		initSignalOwnerNumber()
-		go startSignalListener()
+		signal.InitOwnerNumber()
+		go signal.StartListener()
 	}
 
 	select {}

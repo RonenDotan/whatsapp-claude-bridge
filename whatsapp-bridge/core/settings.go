@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"encoding/json"
@@ -11,8 +11,8 @@ type Settings struct {
 	SignalEnabled   bool `json:"signal_enabled"`
 }
 
-func loadSettings() Settings {
-	data, err := os.ReadFile(filepath.Join(dataDir(), "settings.json"))
+func LoadSettings() Settings {
+	data, err := os.ReadFile(filepath.Join(DataDir(), "settings.json"))
 	if err != nil {
 		return Settings{WhatsAppEnabled: true, SignalEnabled: true}
 	}
