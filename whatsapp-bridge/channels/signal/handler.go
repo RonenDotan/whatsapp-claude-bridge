@@ -405,127 +405,15 @@ func InitOwnerNumber() {
 // ─── Bridge commands ──────────────────────────────────────────────────────────
 
 func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
-	cmd := strings.TrimSpace(content)
-	isPersonality := strings.HasPrefix(cmd, "!set-personality")
-	isIcon := strings.HasPrefix(cmd, "!set-icon")
-	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session", "!cancel", "!version":
-	default:
-		if !isPersonality && !isIcon {
-			return false
-		}
-	}
-	if !isFromMe {
-		sendSignalMessage(chatID, "⚠️ Only the bridge owner can use bridge commands")
-		return true
-	}
-	switch cmd {
-	case "!help":
-		sendSignalMessage(chatID, "Bridge commands:\n"+
-			"!meet-claude — add this chat to Claude whitelist\n"+
-			"!remove-claude — remove this chat from Claude whitelist\n"+
-			"!meet-codex — add this chat to Codex whitelist\n"+
-			"!remove-codex — remove this chat from Codex whitelist\n"+
-			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
-			"!cancel — cancel the currently running request\n"+
-			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
-			"!stats — show token usage and cost for this session\n"+
-			"!version — show bridge version\n"+
-			"!help — show this help screen\n"+
-			"\nReactions (react to any message):\n"+
-			"🔊🔈📢🔉🗣️📣🎤🎙️🎧 — read aloud and save as mp3\n"+
-			"📝 — summarize\n"+
-			"🔥 — expand with more detail\n"+
-			"❓ — explain in simple terms\n"+
-			"🌍 — translate to English\n"+
-			"🇮🇱 — translate to Hebrew\n"+
-			"✅ — extract action items\n"+
-			"(any other emoji) — send reaction context to the LLM")
-	case "!version":
-		sendSignalMessage(chatID, "Bridge version: "+core.BridgeVersion)
-	case "!cancel":
-		if core.CancelRunning(chatID) {
-			sendSignalMessage(chatID, "🛑 Cancelled.")
-		} else {
-			sendSignalMessage(chatID, "Nothing is currently running.")
-		}
-	case "!meet-claude":
-		core.AddSignalAllowedChat(chatID)
-		if err := core.SaveSignalAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		core.EnsureChatClaudeSettings(chatID)
-		sendSignalMessage(chatID, "👋 Hi! I'm Claude. This chat is now connected to me — send any message to get started.")
-	case "!meet-codex":
-		core.AddSignalCodexAllowedChat(chatID)
-		if err := core.SaveSignalCodexAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		core.EnsureChatClaudeSettings(chatID)
-		sendSignalMessage(chatID, "👋 Hi! I'm Codex. This chat is now connected to me — send any message to get started.")
-	case "!remove-claude":
-		core.RemoveSignalAllowedChat(chatID)
-		if err := core.SaveSignalAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		sendSignalMessage(chatID, "✅ Claude has left this chat.")
-	case "!remove-codex":
-		core.RemoveSignalCodexAllowedChat(chatID)
-		if err := core.SaveSignalCodexAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		sendSignalMessage(chatID, "✅ Codex has left this chat.")
-	case "!clear-session":
-		sessions := core.LoadSessions()
-		codexSessions := core.LoadCodexSessions()
-		_, hasSession := sessions[chatID]
-		_, hasCodexSession := codexSessions[chatID]
-		if !hasSession && !hasCodexSession {
-			sendSignalMessage(chatID, "No active session to clear.")
-			return true
-		}
-		core.ClearSessionData(chatID)
-		sendSignalMessage(chatID, "✅ Session cleared for this chat. Next message starts fresh.")
-	}
-	if isPersonality {
-		parts := strings.Fields(cmd)
-		if len(parts) < 2 {
-			current := core.GetChatPersonality(chatID)
-			sendSignalMessage(chatID, fmt.Sprintf("Current personality: %s\nAvailable: default, kids, pro, creative", current))
-			return true
-		}
-		preset := parts[1]
-		switch preset {
-		case "default", "kids", "pro", "creative":
-			if err := core.SetChatPersonality(chatID, preset); err != nil {
-				sendSignalMessage(chatID, "⚠️ Failed to save personality: "+err.Error())
-				return true
-			}
-			core.ClearSessionData(chatID)
-			sendSignalMessage(chatID, fmt.Sprintf("✅ Personality set to: %s (session reset — changes take effect now)", preset))
-		default:
-			sendSignalMessage(chatID, "⚠️ Unknown preset. Available: default, kids, pro, creative")
-		}
-	}
-	if isIcon {
-		parts := strings.Fields(cmd)
-		if len(parts) < 2 {
-			sendSignalMessage(chatID, "Usage: !set-icon <emoji>")
-			return true
-		}
-		emoji := parts[1]
-		if err := core.SetIconForChat(chatID, emoji); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to set icon: "+err.Error())
-			return true
-		}
-		core.ClearSessionData(chatID)
-		sendSignalMessage(chatID, fmt.Sprintf("✅ Icon set to: %s (session reset — changes take effect now)", emoji))
-	}
-	return true
+	return core.HandleBridgeCommand(chatID, content, isFromMe, core.ChannelHooks{
+		Send:               func(text string) { sendSignalMessage(chatID, text) },
+		AddAllowed:         core.AddSignalAllowedChat,
+		RemoveAllowed:      core.RemoveSignalAllowedChat,
+		SaveAllowed:        core.SaveSignalAllowedChats,
+		AddCodexAllowed:    core.AddSignalCodexAllowedChat,
+		RemoveCodexAllowed: core.RemoveSignalCodexAllowedChat,
+		SaveCodexAllowed:   core.SaveSignalCodexAllowedChats,
+	})
 }
 
 // ─── Message router ───────────────────────────────────────────────────────────

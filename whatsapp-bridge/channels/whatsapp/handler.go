@@ -791,131 +791,16 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 // ─── Bridge command handler ───────────────────────────────────────────────────
 
 func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFromMe bool) bool {
-	cmd := strings.TrimSpace(content)
-	isPersonality := strings.HasPrefix(cmd, "!set-personality")
-	isIcon := strings.HasPrefix(cmd, "!set-icon")
-	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session", "!cancel", "!version":
-	default:
-		if !isPersonality && !isIcon {
-			return false
-		}
-	}
-	if !isFromMe {
-		sendWhatsAppMessage(client, chatJID, "⚠️ Only the bridge owner can use bridge commands", "")
-		return true
-	}
-	switch cmd {
-	case "!help":
-		sendWhatsAppMessage(client, chatJID, "Bridge commands:\n"+
-			"!meet-claude — add this chat to Claude whitelist\n"+
-			"!remove-claude — remove this chat from Claude whitelist\n"+
-			"!meet-codex — add this chat to Codex whitelist\n"+
-			"!remove-codex — remove this chat from Codex whitelist\n"+
-			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
-			"!cancel — cancel the currently running request\n"+
-			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
-			"!stats — show token usage and cost for this session\n"+
-			"!version — show bridge version\n"+
-			"!help — show this help screen\n"+
-			"\nReactions (react to any message):\n"+
-			"🔊🔈📢🔉🗣️📣🎤🎙️🎧 — read aloud and save as mp3\n"+
-			"📝 — summarize\n"+
-			"🔥 — expand with more detail\n"+
-			"❓ — explain in simple terms\n"+
-			"🌍 — translate to English\n"+
-			"🇮🇱 — translate to Hebrew\n"+
-			"✅ — extract action items\n"+
-			"(any other emoji) — send reaction context to the LLM", "")
-	case "!version":
-		sendWhatsAppMessage(client, chatJID, "Bridge version: "+core.BridgeVersion, "")
-	case "!cancel":
-		if core.CancelRunning(chatJID) {
-			sendWhatsAppMessage(client, chatJID, "🛑 Cancelled.", "")
-		} else {
-			sendWhatsAppMessage(client, chatJID, "Nothing is currently running.", "")
-		}
-	case "!meet-claude":
-		core.AddAllowedChat(chatJID)
-		if err := core.SaveAllowedChats(); err != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
-			return true
-		}
-		core.EnsureChatClaudeSettings(chatJID)
-		sendWhatsAppMessage(client, chatJID, "👋 Hi! I'm Claude. This chat is now connected to me — send any message to get started.", "")
-	case "!meet-codex":
-		core.AddCodexAllowedChat(chatJID)
-		if err := core.SaveCodexAllowedChats(); err != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
-			return true
-		}
-		core.EnsureChatClaudeSettings(chatJID)
-		sendWhatsAppMessage(client, chatJID, "👋 Hi! I'm Codex. This chat is now connected to me — send any message to get started.", "")
-	case "!remove-claude":
-		core.RemoveAllowedChat(chatJID)
-		if err := core.SaveAllowedChats(); err != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
-			return true
-		}
-		sendWhatsAppMessage(client, chatJID, "✅ Claude has left this chat.", "")
-	case "!remove-codex":
-		core.RemoveCodexAllowedChat(chatJID)
-		if err := core.SaveCodexAllowedChats(); err != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save whitelist: "+err.Error(), "")
-			return true
-		}
-		sendWhatsAppMessage(client, chatJID, "✅ Codex has left this chat.", "")
-	case "!clear-session":
-		sessions := core.LoadSessions()
-		codexSessions := core.LoadCodexSessions()
-		_, hasSession := sessions[chatJID]
-		_, hasCodexSession := codexSessions[chatJID]
-		if !hasSession && !hasCodexSession {
-			sendWhatsAppMessage(client, chatJID, "No active session to clear.", "")
-			return true
-		}
-		handleClearSession(client, chatJID)
-	}
-	if isPersonality {
-		parts := strings.Fields(cmd)
-		if len(parts) < 2 {
-			current := core.GetChatPersonality(chatJID)
-			sendWhatsAppMessage(client, chatJID, fmt.Sprintf("Current personality: %s\nAvailable: default, kids, pro, creative", current), "")
-			return true
-		}
-		preset := parts[1]
-		switch preset {
-		case "default", "kids", "pro", "creative":
-			if err := core.SetChatPersonality(chatJID, preset); err != nil {
-				sendWhatsAppMessage(client, chatJID, "⚠️ Failed to save personality: "+err.Error(), "")
-				return true
-			}
-			core.ClearSessionData(chatJID)
-			sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Personality set to: %s (session reset — changes take effect now)", preset), "")
-		default:
-			sendWhatsAppMessage(client, chatJID, "⚠️ Unknown preset. Available: default, kids, pro, creative", "")
-		}
-	}
-	if isIcon {
-		parts := strings.Fields(cmd)
-		if len(parts) < 2 {
-			sendWhatsAppMessage(client, chatJID, "Usage: !set-icon <emoji>", "")
-			return true
-		}
-		emoji := parts[1]
-		if err := core.SetIconForChat(chatJID, emoji); err != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Failed to set icon: "+err.Error(), "")
-			return true
-		}
-		core.ClearSessionData(chatJID)
-		sendWhatsAppMessage(client, chatJID, fmt.Sprintf("✅ Icon set to: %s (session reset — changes take effect now)", emoji), "")
-	}
-	return true
-}
-
-func handleClearSession(client *whatsmeow.Client, chatJID string) {
-	core.ClearSessionData(chatJID)
-	sendWhatsAppMessage(client, chatJID, "✅ Session cleared for this chat. Next message starts fresh.", "")
+	send := func(text string) { sendWhatsAppMessage(client, chatJID, text, "") }
+	return core.HandleBridgeCommand(chatJID, content, isFromMe, core.ChannelHooks{
+		Send:               send,
+		AddAllowed:         core.AddAllowedChat,
+		RemoveAllowed:      core.RemoveAllowedChat,
+		SaveAllowed:        core.SaveAllowedChats,
+		AddCodexAllowed:    core.AddCodexAllowedChat,
+		RemoveCodexAllowed: core.RemoveCodexAllowedChat,
+		SaveCodexAllowed:   core.SaveCodexAllowedChats,
+	})
 }
 
 // ─── Message handler ──────────────────────────────────────────────────────────
