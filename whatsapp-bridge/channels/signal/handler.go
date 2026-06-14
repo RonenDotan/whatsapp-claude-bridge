@@ -1,4 +1,4 @@
-package main
+package signal
 
 import (
 	"encoding/json"
@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"whatsapp-client/core"
 )
 
 // ─── Signal JSON-RPC wire types ───────────────────────────────────────────────
@@ -150,7 +152,7 @@ func transcribeSignalVoice(attachments []signalAttachment) (string, error) {
 			return "", fmt.Errorf("attachment file not found at %s: %w", path, err)
 		}
 		log.Printf("Signal: transcribing voice attachment %s", path)
-		return transcribeAudio(path)
+		return core.TranscribeAudio(path)
 	}
 	return "", nil
 }
@@ -381,7 +383,7 @@ func detectSignalOwnerNumber() string {
 	return ""
 }
 
-func initSignalOwnerNumber() {
+func InitOwnerNumber() {
 	n := detectSignalOwnerNumber()
 	if n == "" {
 		n = os.Getenv("SIGNAL_OWNER_NUMBER")
@@ -401,207 +403,43 @@ func initSignalOwnerNumber() {
 // ─── Bridge commands ──────────────────────────────────────────────────────────
 
 func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
-	cmd := strings.TrimSpace(content)
-	isPersonality := strings.HasPrefix(cmd, "!set-personality")
-	isIcon := strings.HasPrefix(cmd, "!set-icon")
-	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex", "!help", "!clear-session", "!cancel":
-	default:
-		if !isPersonality && !isIcon {
-			return false
-		}
-	}
-	if !isFromMe {
-		sendSignalMessage(chatID, "⚠️ Only the bridge owner can use bridge commands")
-		return true
-	}
-	switch cmd {
-	case "!help":
-		sendSignalMessage(chatID, "Bridge commands:\n"+
-			"!meet-claude — add this chat to Claude whitelist\n"+
-			"!remove-claude — remove this chat from Claude whitelist\n"+
-			"!meet-codex — add this chat to Codex whitelist\n"+
-			"!remove-codex — remove this chat from Codex whitelist\n"+
-			"!clear-session — clear Claude/Codex session memory and start fresh\n"+
-			"!cancel — cancel the currently running request\n"+
-			"!set-personality <preset> — set personality (default / kids / pro / creative)\n"+
-			"!stats — show token usage and cost for this session\n"+
-			"!help — show this help screen\n"+
-			"\nReactions (react to any message):\n"+
-			"🔊🔈📢🔉🗣️📣🎤🎙️🎧 — read aloud and save as mp3\n"+
-			"📝 — summarize\n"+
-			"🔥 — expand with more detail\n"+
-			"❓ — explain in simple terms\n"+
-			"🌍 — translate to English\n"+
-			"🇮🇱 — translate to Hebrew\n"+
-			"✅ — extract action items\n"+
-			"(any other emoji) — send reaction context to the LLM")
-	case "!cancel":
-		if CancelRunning(chatID) {
-			sendSignalMessage(chatID, "🛑 Cancelled.")
-		} else {
-			sendSignalMessage(chatID, "Nothing is currently running.")
-		}
-	case "!meet-claude":
-		signalAllowedChatsMu.Lock()
-		signalAllowedChats[chatID] = struct{}{}
-		signalAllowedChatsMu.Unlock()
-		if err := saveSignalAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		ensureChatClaudeSettings(chatID)
-		sendSignalMessage(chatID, "👋 Hi! I'm Claude. This chat is now connected to me — send any message to get started.")
-	case "!meet-codex":
-		signalCodexAllowedChatsMu.Lock()
-		signalCodexAllowedChats[chatID] = struct{}{}
-		signalCodexAllowedChatsMu.Unlock()
-		if err := saveSignalCodexAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		ensureChatClaudeSettings(chatID)
-		sendSignalMessage(chatID, "👋 Hi! I'm Codex. This chat is now connected to me — send any message to get started.")
-	case "!remove-claude":
-		signalAllowedChatsMu.Lock()
-		delete(signalAllowedChats, chatID)
-		signalAllowedChatsMu.Unlock()
-		if err := saveSignalAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		sendSignalMessage(chatID, "✅ Claude has left this chat.")
-	case "!remove-codex":
-		signalCodexAllowedChatsMu.Lock()
-		delete(signalCodexAllowedChats, chatID)
-		signalCodexAllowedChatsMu.Unlock()
-		if err := saveSignalCodexAllowedChats(); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to save whitelist: "+err.Error())
-			return true
-		}
-		sendSignalMessage(chatID, "✅ Codex has left this chat.")
-	case "!clear-session":
-		sessions := loadSessions()
-		codexSessions := loadCodexSessions()
-		_, hasSession := sessions[chatID]
-		_, hasCodexSession := codexSessions[chatID]
-		if !hasSession && !hasCodexSession {
-			sendSignalMessage(chatID, "No active session to clear.")
-			return true
-		}
-		deleteSession(chatID)
-		deleteCodexSession(chatID)
-		inputHistoryMu.Lock()
-		delete(inputHistory, chatID)
-		inputHistoryMu.Unlock()
-		sendSignalMessage(chatID, "✅ Session cleared for this chat. Next message starts fresh.")
-	}
-	if isPersonality {
-		parts := strings.Fields(cmd)
-		if len(parts) < 2 {
-			current := getChatPersonality(chatID)
-			sendSignalMessage(chatID, fmt.Sprintf("Current personality: %s\nAvailable: default, kids, pro, creative", current))
-			return true
-		}
-		preset := parts[1]
-		switch preset {
-		case "default", "kids", "pro", "creative":
-			if err := setChatPersonality(chatID, preset); err != nil {
-				sendSignalMessage(chatID, "⚠️ Failed to save personality: "+err.Error())
-				return true
-			}
-			clearSessionData(chatID)
-			sendSignalMessage(chatID, fmt.Sprintf("✅ Personality set to: %s (session reset — changes take effect now)", preset))
-		default:
-			sendSignalMessage(chatID, "⚠️ Unknown preset. Available: default, kids, pro, creative")
-		}
-	}
-	if isIcon {
-		parts := strings.Fields(cmd)
-		if len(parts) < 2 {
-			sendSignalMessage(chatID, "Usage: !set-icon <emoji>")
-			return true
-		}
-		emoji := parts[1]
-		if err := setIconForChat(chatID, emoji); err != nil {
-			sendSignalMessage(chatID, "⚠️ Failed to set icon: "+err.Error())
-			return true
-		}
-		clearSessionData(chatID)
-		sendSignalMessage(chatID, fmt.Sprintf("✅ Icon set to: %s (session reset — changes take effect now)", emoji))
-	}
-	return true
+	return core.HandleBridgeCommand(chatID, content, isFromMe, core.ChannelHooks{
+		Send:               func(text string) { sendSignalMessage(chatID, text) },
+		AddAllowed:         core.AddSignalAllowedChat,
+		RemoveAllowed:      core.RemoveSignalAllowedChat,
+		SaveAllowed:        core.SaveSignalAllowedChats,
+		AddCodexAllowed:    core.AddSignalCodexAllowedChat,
+		RemoveCodexAllowed: core.RemoveSignalCodexAllowedChat,
+		SaveCodexAllowed:   core.SaveSignalCodexAllowedChats,
+	})
 }
 
 // ─── Message router ───────────────────────────────────────────────────────────
 
-func dispatchSignalContent(chatID, content string) {
-	if content == "" || !isSignalAllowedChat(chatID) {
+func dispatchSignalContent(chatID, content string, inbox chan<- core.IncomingMessage) {
+	if content == "" || !core.IsSignalAllowedChat(chatID) {
 		return
 	}
 	setLastSignalActiveChat(chatID)
-
-	if isLooping(chatID, content) {
-		sendSignalMessage(chatID, "⚠️ You've sent the same message several times. Try rephrasing or type 'clear session' to start fresh.")
-		return
-	}
-	addToInputHistory(chatID, content)
-
-	if isSignalCodexChat(chatID) {
-		if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
-			codexStatsMu.Lock()
-			cStats, cOk := codexStatsMap[chatID]
-			codexStatsMu.Unlock()
-			var reply string
-			if !cOk {
-				reply = "No stats yet — send a message first."
-			} else {
-				reply = fmt.Sprintf("📊 Codex stats:\n• Input tokens: %d\n• Output tokens: %d\n• Total tokens: %d\n• Last updated: %s",
-					cStats.InputTokens, cStats.OutputTokens, cStats.TotalTokens, cStats.LastUpdated)
+	inbox <- core.IncomingMessage{
+		ChatID:      chatID,
+		Text:        content,
+		IsCodexChat: core.IsSignalCodexChat(chatID),
+		Reply: func(text string) string {
+			ts := sendSignalMessage(chatID, text)
+			if ts != 0 {
+				return fmt.Sprintf("%d", ts)
 			}
-			sendSignalMessage(chatID, reply)
-		} else {
-			go handleWithCodex(chatID, content, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
-				if ts != 0 {
-					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-				}
-			}, func(path string) {
-				sendSignalMessage(chatID, "📎 [test] output file: "+path)
-				sendSignalFile(chatID, path)
-			})
-		}
-	} else {
-		if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
-			usageStatsMu.Lock()
-			stats, ok := usageStatsMap[chatID]
-			usageStatsMu.Unlock()
-			var reply string
-			if !ok {
-				reply = "No stats yet — send a message first."
-			} else {
-				durationSec := float64(stats.DurationMs) / 1000.0
-				reply = fmt.Sprintf("📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Response time: %.1fs\n• Last updated: %s",
-					stats.CacheReadTokens, stats.CacheWriteTokens,
-					stats.InputTokens, stats.OutputTokens,
-					stats.TotalCostUSD, durationSec, stats.LastUpdated)
-			}
-			sendSignalMessage(chatID, reply)
-		} else {
-			go handleWithClaude(chatID, content, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
-				if ts != 0 {
-					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-				}
-			}, func(path string) {
-				sendSignalMessage(chatID, "📎 [test] output file: "+path)
-				sendSignalFile(chatID, path)
-			})
-		}
+			return ""
+		},
+		ReplyMedia: func(path string) {
+			sendSignalMessage(chatID, "📎 [test] output file: "+path)
+			sendSignalFile(chatID, path)
+		},
 	}
 }
 
-func handleSignalMessage(env signalEnvelope) {
+func handleSignalMessage(env signalEnvelope, inbox chan<- core.IncomingMessage) {
 	if len(env.SyncMessage) > 0 && string(env.SyncMessage) != "null" {
 		// syncMessage is the "sent from another device" mirror — only valid when we are the sender.
 		// When someone else sends in a group, signal-cli emits both a dataMessage (correct, has
@@ -641,34 +479,28 @@ func handleSignalMessage(env signalEnvelope) {
 		if msg.Reaction != nil {
 			r := msg.Reaction
 			log.Printf("Signal sync reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
-			if r.IsRemove || r.Emoji == "" || !isSignalAllowedChat(chatID) {
+			if r.IsRemove || r.Emoji == "" || !core.IsSignalAllowedChat(chatID) {
 				return
 			}
 			targetKey := fmt.Sprintf("%d", r.TargetSentTimestamp)
-			text, found := LookupRecentMessage(chatID, targetKey)
+			text, found := core.LookupRecentMessage(chatID, targetKey)
 			if !found {
 				sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
 				return
 			}
-			prompt := lookupReactionPrompt(r.Emoji, text)
-			if isSignalCodexChat(chatID) {
-				go handleWithCodex(chatID, prompt, func(reply string) {
-					ts := sendSignalMessage(chatID, reply)
+			prompt := core.LookupReactionPrompt(r.Emoji, text)
+			inbox <- core.IncomingMessage{
+				ChatID:      chatID,
+				Text:        prompt,
+				IsCodexChat: core.IsSignalCodexChat(chatID),
+				Reply: func(text string) string {
+					ts := sendSignalMessage(chatID, text)
 					if ts != 0 {
-						StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+						return fmt.Sprintf("%d", ts)
 					}
-				}, func(path string) {
-					sendSignalFile(chatID, path)
-				})
-			} else {
-				go handleWithClaude(chatID, prompt, func(reply string) {
-					ts := sendSignalMessage(chatID, reply)
-					if ts != 0 {
-						StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-					}
-				}, func(path string) {
-					sendSignalFile(chatID, path)
-				})
+					return ""
+				},
+				ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
 			}
 			return
 		}
@@ -696,19 +528,11 @@ func handleSignalMessage(env signalEnvelope) {
 			}
 		}
 		// Non-audio attachment (image) sent by the owner — process via LLM.
-		if content == "" && len(msg.Attachments) > 0 && isSignalAllowedChat(chatID) {
+		if content == "" && len(msg.Attachments) > 0 && core.IsSignalAllowedChat(chatID) {
 			log.Printf("Signal sync: image attachment(s) in chat=%s attachments=%d", chatID, len(msg.Attachments))
 			ch := NewSignalChannel()
-			var llm LLM
-			if isSignalCodexChat(chatID) {
-				llm = NewCodexLLM()
-			} else {
-				llm = NewClaudeLLM()
-			}
-			inMsg := IncomingMessage{
+			inMsg := core.IncomingMessage{
 				ChatID:   chatID,
-				SenderID: "",
-				Text:     "",
 				IsFromMe: true,
 				RawData:  msg.Attachments,
 			}
@@ -721,14 +545,19 @@ func handleSignalMessage(env signalEnvelope) {
 				log.Printf("Signal sync: attachment file not found on disk for chat=%s — skipping", chatID)
 			}
 			if att != nil {
-				go func() {
-					reply, procErr := llm.ProcessWithAttachment(chatID, "", att)
-					if procErr != nil {
-						sendSignalMessage(chatID, "⚠️ Could not process attachment: "+procErr.Error())
-						return
-					}
-					sendSignalMessage(chatID, reply)
-				}()
+				inbox <- core.IncomingMessage{
+					ChatID:      chatID,
+					IsCodexChat: core.IsSignalCodexChat(chatID),
+					Attachment:  att,
+					Reply: func(text string) string {
+						ts := sendSignalMessage(chatID, text)
+						if ts != 0 {
+							return fmt.Sprintf("%d", ts)
+						}
+						return ""
+					},
+					ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
+				}
 				return
 			}
 		}
@@ -736,8 +565,8 @@ func handleSignalMessage(env signalEnvelope) {
 			return
 		}
 		log.Printf("Signal sync← (chat=%s): %s", chatID, content)
-		StoreRecentMessage(chatID, fmt.Sprintf("%d", msg.Timestamp), content)
-		dispatchSignalContent(chatID, content)
+		core.StoreRecentMessage(chatID, fmt.Sprintf("%d", msg.Timestamp), content)
+		dispatchSignalContent(chatID, content, inbox)
 		return
 	}
 
@@ -757,7 +586,7 @@ func handleSignalMessage(env signalEnvelope) {
 		return
 	}
 
-	if !isSignalAllowedChat(chatID) {
+	if !core.IsSignalAllowedChat(chatID) {
 		if len(content) < 2 || content[:2] != "!m" {
 			return
 		}
@@ -772,34 +601,28 @@ func handleSignalMessage(env signalEnvelope) {
 	if env.DataMessage.Reaction != nil {
 		r := env.DataMessage.Reaction
 		log.Printf("Signal data reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
-		if r.IsRemove || r.Emoji == "" || !isSignalAllowedChat(chatID) {
+		if r.IsRemove || r.Emoji == "" || !core.IsSignalAllowedChat(chatID) {
 			return
 		}
 		targetKey := fmt.Sprintf("%d", r.TargetSentTimestamp)
-		text, found := LookupRecentMessage(chatID, targetKey)
+		text, found := core.LookupRecentMessage(chatID, targetKey)
 		if !found {
 			sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
 			return
 		}
-		prompt := lookupReactionPrompt(r.Emoji, text)
-		if isSignalCodexChat(chatID) {
-			go handleWithCodex(chatID, prompt, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
+		prompt := core.LookupReactionPrompt(r.Emoji, text)
+		inbox <- core.IncomingMessage{
+			ChatID:      chatID,
+			Text:        prompt,
+			IsCodexChat: core.IsSignalCodexChat(chatID),
+			Reply: func(text string) string {
+				ts := sendSignalMessage(chatID, text)
 				if ts != 0 {
-					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+					return fmt.Sprintf("%d", ts)
 				}
-			}, func(path string) {
-				sendSignalFile(chatID, path)
-			})
-		} else {
-			go handleWithClaude(chatID, prompt, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
-				if ts != 0 {
-					StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-				}
-			}, func(path string) {
-				sendSignalFile(chatID, path)
-			})
+				return ""
+			},
+			ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
 		}
 		return
 	}
@@ -833,18 +656,11 @@ func handleSignalMessage(env signalEnvelope) {
 	}
 
 	// ── Non-audio attachment pipeline ─────────────────────────────────────────
-	if content == "" && len(env.DataMessage.Attachments) > 0 && isSignalAllowedChat(chatID) && !isFromMe {
+	if content == "" && len(env.DataMessage.Attachments) > 0 && core.IsSignalAllowedChat(chatID) && !isFromMe {
 		ch := NewSignalChannel()
-		var llm LLM
-		if isSignalCodexChat(chatID) {
-			llm = NewCodexLLM()
-		} else {
-			llm = NewClaudeLLM()
-		}
-		inMsg := IncomingMessage{
+		inMsg := core.IncomingMessage{
 			ChatID:   chatID,
 			SenderID: env.Source,
-			Text:     "",
 			IsFromMe: isFromMe,
 			RawData:  env.DataMessage.Attachments,
 		}
@@ -854,24 +670,29 @@ func handleSignalMessage(env signalEnvelope) {
 			return
 		}
 		if att != nil {
-			go func() {
-				reply, procErr := llm.ProcessWithAttachment(chatID, "", att)
-				if procErr != nil {
-					sendSignalMessage(chatID, "⚠️ Could not process attachment: "+procErr.Error())
-					return
-				}
-				sendSignalMessage(chatID, reply)
-			}()
+			inbox <- core.IncomingMessage{
+				ChatID:      chatID,
+				IsCodexChat: core.IsSignalCodexChat(chatID),
+				Attachment:  att,
+				Reply: func(text string) string {
+					ts := sendSignalMessage(chatID, text)
+					if ts != 0 {
+						return fmt.Sprintf("%d", ts)
+					}
+					return ""
+				},
+				ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
+			}
 			return
 		}
 	}
 
 	// Store incoming user message for reaction lookup.
 	if content != "" {
-		StoreRecentMessage(chatID, fmt.Sprintf("%d", env.DataMessage.Timestamp), content)
+		core.StoreRecentMessage(chatID, fmt.Sprintf("%d", env.DataMessage.Timestamp), content)
 	}
 
-	dispatchSignalContent(chatID, content)
+	dispatchSignalContent(chatID, content, inbox)
 }
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
@@ -905,7 +726,7 @@ func signalHeartbeat(conn net.Conn, stop <-chan struct{}) {
 
 // ─── Listener goroutine ───────────────────────────────────────────────────────
 
-func startSignalListener() {
+func StartListener(inbox chan<- core.IncomingMessage) {
 	backoff := time.Second
 	for {
 		log.Printf("Signal: connecting to 127.0.0.1:7583...")
@@ -946,7 +767,7 @@ func startSignalListener() {
 					log.Printf("Signal: failed to parse receive params: %v", err)
 					continue
 				}
-				go handleSignalMessage(params.Envelope)
+				go handleSignalMessage(params.Envelope, inbox)
 			} else if msg.Method == "" && msg.ID != nil && msg.ID != float64(0) {
 				if len(msg.Error) > 0 && string(msg.Error) != "null" {
 					log.Printf("Signal: RPC error id=%v: %s", msg.ID, string(msg.Error))
