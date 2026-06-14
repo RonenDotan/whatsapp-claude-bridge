@@ -1,13 +1,20 @@
 package core
 
 // IncomingMessage is the normalised representation of a message received from any channel.
+// The channel handler fills Reply/ReplyMedia/IsCodexChat before sending to the inbox.
 type IncomingMessage struct {
-	ChatID    string
-	SenderID  string
-	Text      string
-	IsFromMe  bool
-	MessageID string
-	RawData   interface{}
+	ChatID      string
+	SenderID    string
+	Text        string
+	IsFromMe    bool
+	MessageID   string
+	IsCodexChat bool
+	Attachment  *Attachment
+	// Reply sends a text reply back through the originating channel.
+	// Returns a stable ID (msgID or timestamp string) for cache storage, or "" if unavailable.
+	Reply      func(text string) string
+	ReplyMedia func(path string)
+	RawData    interface{}
 }
 
 // Attachment represents a file received via any channel.

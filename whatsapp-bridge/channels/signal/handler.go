@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"whatsapp-client/core"
-	"whatsapp-client/llms/claude"
-	"whatsapp-client/llms/codex"
 )
 
 // ─── Signal JSON-RPC wire types ───────────────────────────────────────────────
@@ -418,69 +416,30 @@ func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
 
 // ─── Message router ───────────────────────────────────────────────────────────
 
-func dispatchSignalContent(chatID, content string) {
+func dispatchSignalContent(chatID, content string, inbox chan<- core.IncomingMessage) {
 	if content == "" || !core.IsSignalAllowedChat(chatID) {
 		return
 	}
 	setLastSignalActiveChat(chatID)
-
-	if core.IsLooping(chatID, content) {
-		sendSignalMessage(chatID, "⚠️ You've sent the same message several times. Try rephrasing or type 'clear session' to start fresh.")
-		return
-	}
-	core.AddToInputHistory(chatID, content)
-
-	if core.IsSignalCodexChat(chatID) {
-		if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
-			cStats, cOk := core.GetCodexStats(chatID)
-			var reply string
-			if !cOk {
-				reply = "No stats yet — send a message first."
-			} else {
-				reply = fmt.Sprintf("📊 Codex stats:\n• Input tokens: %d\n• Output tokens: %d\n• Total tokens: %d\n• Last updated: %s",
-					cStats.InputTokens, cStats.OutputTokens, cStats.TotalTokens, cStats.LastUpdated)
+	inbox <- core.IncomingMessage{
+		ChatID:      chatID,
+		Text:        content,
+		IsCodexChat: core.IsSignalCodexChat(chatID),
+		Reply: func(text string) string {
+			ts := sendSignalMessage(chatID, text)
+			if ts != 0 {
+				return fmt.Sprintf("%d", ts)
 			}
-			sendSignalMessage(chatID, reply)
-		} else {
-			go codex.HandleWithCodex(chatID, content, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
-				if ts != 0 {
-					core.StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-				}
-			}, func(path string) {
-				sendSignalMessage(chatID, "📎 [test] output file: "+path)
-				sendSignalFile(chatID, path)
-			})
-		}
-	} else {
-		if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
-			stats, ok := core.GetUsageStats(chatID)
-			var reply string
-			if !ok {
-				reply = "No stats yet — send a message first."
-			} else {
-				durationSec := float64(stats.DurationMs) / 1000.0
-				reply = fmt.Sprintf("📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Response time: %.1fs\n• Last updated: %s",
-					stats.CacheReadTokens, stats.CacheWriteTokens,
-					stats.InputTokens, stats.OutputTokens,
-					stats.TotalCostUSD, durationSec, stats.LastUpdated)
-			}
-			sendSignalMessage(chatID, reply)
-		} else {
-			go claude.HandleWithClaude(chatID, content, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
-				if ts != 0 {
-					core.StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-				}
-			}, func(path string) {
-				sendSignalMessage(chatID, "📎 [test] output file: "+path)
-				sendSignalFile(chatID, path)
-			})
-		}
+			return ""
+		},
+		ReplyMedia: func(path string) {
+			sendSignalMessage(chatID, "📎 [test] output file: "+path)
+			sendSignalFile(chatID, path)
+		},
 	}
 }
 
-func handleSignalMessage(env signalEnvelope) {
+func handleSignalMessage(env signalEnvelope, inbox chan<- core.IncomingMessage) {
 	if len(env.SyncMessage) > 0 && string(env.SyncMessage) != "null" {
 		// syncMessage is the "sent from another device" mirror — only valid when we are the sender.
 		// When someone else sends in a group, signal-cli emits both a dataMessage (correct, has
@@ -530,24 +489,18 @@ func handleSignalMessage(env signalEnvelope) {
 				return
 			}
 			prompt := core.LookupReactionPrompt(r.Emoji, text)
-			if core.IsSignalCodexChat(chatID) {
-				go codex.HandleWithCodex(chatID, prompt, func(reply string) {
-					ts := sendSignalMessage(chatID, reply)
+			inbox <- core.IncomingMessage{
+				ChatID:      chatID,
+				Text:        prompt,
+				IsCodexChat: core.IsSignalCodexChat(chatID),
+				Reply: func(text string) string {
+					ts := sendSignalMessage(chatID, text)
 					if ts != 0 {
-						core.StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+						return fmt.Sprintf("%d", ts)
 					}
-				}, func(path string) {
-					sendSignalFile(chatID, path)
-				})
-			} else {
-				go claude.HandleWithClaude(chatID, prompt, func(reply string) {
-					ts := sendSignalMessage(chatID, reply)
-					if ts != 0 {
-						core.StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-					}
-				}, func(path string) {
-					sendSignalFile(chatID, path)
-				})
+					return ""
+				},
+				ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
 			}
 			return
 		}
@@ -578,16 +531,8 @@ func handleSignalMessage(env signalEnvelope) {
 		if content == "" && len(msg.Attachments) > 0 && core.IsSignalAllowedChat(chatID) {
 			log.Printf("Signal sync: image attachment(s) in chat=%s attachments=%d", chatID, len(msg.Attachments))
 			ch := NewSignalChannel()
-			var llm core.LLM
-			if core.IsSignalCodexChat(chatID) {
-				llm = codex.NewCodexLLM()
-			} else {
-				llm = claude.NewClaudeLLM()
-			}
 			inMsg := core.IncomingMessage{
 				ChatID:   chatID,
-				SenderID: "",
-				Text:     "",
 				IsFromMe: true,
 				RawData:  msg.Attachments,
 			}
@@ -600,14 +545,19 @@ func handleSignalMessage(env signalEnvelope) {
 				log.Printf("Signal sync: attachment file not found on disk for chat=%s — skipping", chatID)
 			}
 			if att != nil {
-				go func() {
-					reply, procErr := llm.ProcessWithAttachment(chatID, "", att)
-					if procErr != nil {
-						sendSignalMessage(chatID, "⚠️ Could not process attachment: "+procErr.Error())
-						return
-					}
-					sendSignalMessage(chatID, reply)
-				}()
+				inbox <- core.IncomingMessage{
+					ChatID:      chatID,
+					IsCodexChat: core.IsSignalCodexChat(chatID),
+					Attachment:  att,
+					Reply: func(text string) string {
+						ts := sendSignalMessage(chatID, text)
+						if ts != 0 {
+							return fmt.Sprintf("%d", ts)
+						}
+						return ""
+					},
+					ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
+				}
 				return
 			}
 		}
@@ -616,7 +566,7 @@ func handleSignalMessage(env signalEnvelope) {
 		}
 		log.Printf("Signal sync← (chat=%s): %s", chatID, content)
 		core.StoreRecentMessage(chatID, fmt.Sprintf("%d", msg.Timestamp), content)
-		dispatchSignalContent(chatID, content)
+		dispatchSignalContent(chatID, content, inbox)
 		return
 	}
 
@@ -661,24 +611,18 @@ func handleSignalMessage(env signalEnvelope) {
 			return
 		}
 		prompt := core.LookupReactionPrompt(r.Emoji, text)
-		if core.IsSignalCodexChat(chatID) {
-			go codex.HandleWithCodex(chatID, prompt, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
+		inbox <- core.IncomingMessage{
+			ChatID:      chatID,
+			Text:        prompt,
+			IsCodexChat: core.IsSignalCodexChat(chatID),
+			Reply: func(text string) string {
+				ts := sendSignalMessage(chatID, text)
 				if ts != 0 {
-					core.StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
+					return fmt.Sprintf("%d", ts)
 				}
-			}, func(path string) {
-				sendSignalFile(chatID, path)
-			})
-		} else {
-			go claude.HandleWithClaude(chatID, prompt, func(reply string) {
-				ts := sendSignalMessage(chatID, reply)
-				if ts != 0 {
-					core.StoreRecentMessage(chatID, fmt.Sprintf("%d", ts), reply)
-				}
-			}, func(path string) {
-				sendSignalFile(chatID, path)
-			})
+				return ""
+			},
+			ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
 		}
 		return
 	}
@@ -714,16 +658,9 @@ func handleSignalMessage(env signalEnvelope) {
 	// ── Non-audio attachment pipeline ─────────────────────────────────────────
 	if content == "" && len(env.DataMessage.Attachments) > 0 && core.IsSignalAllowedChat(chatID) && !isFromMe {
 		ch := NewSignalChannel()
-		var llm core.LLM
-		if core.IsSignalCodexChat(chatID) {
-			llm = codex.NewCodexLLM()
-		} else {
-			llm = claude.NewClaudeLLM()
-		}
 		inMsg := core.IncomingMessage{
 			ChatID:   chatID,
 			SenderID: env.Source,
-			Text:     "",
 			IsFromMe: isFromMe,
 			RawData:  env.DataMessage.Attachments,
 		}
@@ -733,14 +670,19 @@ func handleSignalMessage(env signalEnvelope) {
 			return
 		}
 		if att != nil {
-			go func() {
-				reply, procErr := llm.ProcessWithAttachment(chatID, "", att)
-				if procErr != nil {
-					sendSignalMessage(chatID, "⚠️ Could not process attachment: "+procErr.Error())
-					return
-				}
-				sendSignalMessage(chatID, reply)
-			}()
+			inbox <- core.IncomingMessage{
+				ChatID:      chatID,
+				IsCodexChat: core.IsSignalCodexChat(chatID),
+				Attachment:  att,
+				Reply: func(text string) string {
+					ts := sendSignalMessage(chatID, text)
+					if ts != 0 {
+						return fmt.Sprintf("%d", ts)
+					}
+					return ""
+				},
+				ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
+			}
 			return
 		}
 	}
@@ -750,7 +692,7 @@ func handleSignalMessage(env signalEnvelope) {
 		core.StoreRecentMessage(chatID, fmt.Sprintf("%d", env.DataMessage.Timestamp), content)
 	}
 
-	dispatchSignalContent(chatID, content)
+	dispatchSignalContent(chatID, content, inbox)
 }
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
@@ -784,7 +726,7 @@ func signalHeartbeat(conn net.Conn, stop <-chan struct{}) {
 
 // ─── Listener goroutine ───────────────────────────────────────────────────────
 
-func StartListener() {
+func StartListener(inbox chan<- core.IncomingMessage) {
 	backoff := time.Second
 	for {
 		log.Printf("Signal: connecting to 127.0.0.1:7583...")
@@ -825,7 +767,7 @@ func StartListener() {
 					log.Printf("Signal: failed to parse receive params: %v", err)
 					continue
 				}
-				go handleSignalMessage(params.Envelope)
+				go handleSignalMessage(params.Envelope, inbox)
 			} else if msg.Method == "" && msg.ID != nil && msg.ID != float64(0) {
 				if len(msg.Error) > 0 && string(msg.Error) != "null" {
 					log.Printf("Signal: RPC error id=%v: %s", msg.ID, string(msg.Error))

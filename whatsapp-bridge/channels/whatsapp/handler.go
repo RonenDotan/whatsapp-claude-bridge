@@ -28,8 +28,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"whatsapp-client/core"
-	"whatsapp-client/llms/claude"
-	"whatsapp-client/llms/codex"
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -805,7 +803,7 @@ func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFr
 
 // ─── Message handler ──────────────────────────────────────────────────────────
 
-func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *events.Message, logger waLog.Logger) {
+func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *events.Message, logger waLog.Logger, inbox chan<- core.IncomingMessage) {
 	chatJID := msg.Info.Chat.String()
 	sender := msg.Info.Sender.User
 	name := GetChatName(client, messageStore, msg.Info.Chat, chatJID, nil, sender, logger)
@@ -828,20 +826,15 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			return
 		}
 		prompt := core.LookupReactionPrompt(emoji, text)
-		if core.IsCodexChat(chatJID) {
-			go codex.HandleWithCodex(chatJID, prompt, func(reply string) {
-				_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
-				core.StoreRecentMessage(chatJID, msgID, reply)
-			}, func(path string) {
-				sendWhatsAppMessage(client, chatJID, "", path)
-			})
-		} else {
-			go claude.HandleWithClaude(chatJID, prompt, func(reply string) {
-				_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
-				core.StoreRecentMessage(chatJID, msgID, reply)
-			}, func(path string) {
-				sendWhatsAppMessage(client, chatJID, "", path)
-			})
+		inbox <- core.IncomingMessage{
+			ChatID:      chatJID,
+			Text:        prompt,
+			IsCodexChat: core.IsCodexChat(chatJID),
+			Reply: func(text string) string {
+				_, msgID := sendWhatsAppMessage(client, chatJID, text, "")
+				return msgID
+			},
+			ReplyMedia: func(path string) { sendWhatsAppMessage(client, chatJID, "", path) },
 		}
 		return
 	}
@@ -929,22 +922,25 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		content = "[🎤 Voice]: " + transcript
 	}
 
+	replyFn := func(text string) string {
+		_, msgID := sendWhatsAppMessage(client, chatJID, text, "")
+		return msgID
+	}
+	replyMediaFn := func(path string) {
+		sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
+		sendWhatsAppMessage(client, chatJID, "", path)
+	}
+
 	// ── Non-audio attachment pipeline ──────────────────────────────────────────
 	if mediaType != "" && mediaType != "audio" && core.IsAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
 		ch := NewWhatsAppChannel(client, messageStore)
-		var llm core.LLM
-		if core.IsCodexChat(chatJID) {
-			llm = codex.NewCodexLLM()
-		} else {
-			llm = claude.NewClaudeLLM()
-		}
 		inMsg := core.IncomingMessage{
 			ChatID:    chatJID,
 			SenderID:  sender,
 			Text:      content,
 			IsFromMe:  msg.Info.IsFromMe,
 			MessageID: msg.Info.ID,
-			RawData:   msg.Message, // pass proto so ReceiveAttachment can download directly
+			RawData:   msg.Message,
 		}
 		att, attErr := ch.ReceiveAttachment(inMsg)
 		if attErr != nil {
@@ -952,80 +948,26 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			return
 		}
 		if att != nil {
-			go func() {
-				reply, procErr := llm.ProcessWithAttachment(chatJID, content, att)
-				if procErr != nil {
-					sendWhatsAppMessage(client, chatJID, "⚠️ Could not process attachment: "+procErr.Error(), "")
-					return
-				}
-				sendWhatsAppMessage(client, chatJID, reply, "")
-			}()
+			inbox <- core.IncomingMessage{
+				ChatID:      chatJID,
+				Text:        content,
+				IsCodexChat: core.IsCodexChat(chatJID),
+				Attachment:  att,
+				Reply:       replyFn,
+				ReplyMedia:  replyMediaFn,
+			}
 			return
 		}
 		// att == nil: unsupported media type — fall through to text path
 	}
 
 	if content != "" && core.IsAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
-		if core.IsLooping(chatJID, content) {
-			sendWhatsAppMessage(client, chatJID, "⚠️ You've sent the same message several times. Try rephrasing or type 'clear session' to start fresh.", "")
-			return
-		}
-		core.AddToInputHistory(chatJID, content)
-
-		if core.IsCodexChat(chatJID) {
-			if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
-				cStats, cOk := core.GetCodexStats(chatJID)
-				var cReply string
-				if !cOk {
-					cReply = "No stats yet — send a message first."
-				} else {
-					cReply = fmt.Sprintf(
-						"📊 Codex stats:\n• Input tokens: %d\n• Output tokens: %d\n• Total tokens: %d\n• Last updated: %s",
-						cStats.InputTokens, cStats.OutputTokens, cStats.TotalTokens, cStats.LastUpdated,
-					)
-				}
-				sendWhatsAppMessage(client, chatJID, cReply, "")
-			} else {
-				go codex.HandleWithCodex(chatJID, content, func(reply string) {
-					_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
-					core.StoreRecentMessage(chatJID, msgID, reply)
-				}, func(path string) {
-					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
-					sendWhatsAppMessage(client, chatJID, "", path)
-				})
-			}
-		} else {
-			if strings.ToLower(strings.TrimSpace(content)) == "!stats" {
-				stats, ok := core.GetUsageStats(chatJID)
-				var reply string
-				if !ok {
-					reply = "No stats yet — send a message first."
-				} else {
-					durationSec := float64(stats.DurationMs) / 1000.0
-					reply = fmt.Sprintf(
-						"📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Response time: %.1fs\n• Last updated: %s",
-						stats.CacheReadTokens, stats.CacheWriteTokens,
-						stats.InputTokens, stats.OutputTokens,
-						stats.TotalCostUSD, durationSec, stats.LastUpdated,
-					)
-					if len(stats.ModelUsage) > 1 {
-						reply += "\n\nPer-model breakdown:"
-						for model, mu := range stats.ModelUsage {
-							reply += fmt.Sprintf("\n• %s: %d in / %d out, $%.4f",
-								model, mu.InputTokens, mu.OutputTokens, mu.CostUSD)
-						}
-					}
-				}
-				sendWhatsAppMessage(client, chatJID, reply, "")
-			} else {
-				go claude.HandleWithClaude(chatJID, content, func(reply string) {
-					_, msgID := sendWhatsAppMessage(client, chatJID, reply, "")
-					core.StoreRecentMessage(chatJID, msgID, reply)
-				}, func(path string) {
-					sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
-					sendWhatsAppMessage(client, chatJID, "", path)
-				})
-			}
+		inbox <- core.IncomingMessage{
+			ChatID:      chatJID,
+			Text:        content,
+			IsCodexChat: core.IsCodexChat(chatJID),
+			Reply:       replyFn,
+			ReplyMedia:  replyMediaFn,
 		}
 	}
 }
@@ -1242,7 +1184,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 
 // ─── WhatsApp entry point ─────────────────────────────────────────────────────
 
-func Start() {
+func Start(inbox chan<- core.IncomingMessage) {
 	logger := waLog.Stdout("Client", "INFO", true)
 	logger.Infof("Starting WhatsApp client...")
 
@@ -1286,7 +1228,7 @@ func Start() {
 	client.AddEventHandler(func(evt interface{}) {
 		switch v := evt.(type) {
 		case *events.Message:
-			handleMessage(client, messageStore, v, logger)
+			handleMessage(client, messageStore, v, logger, inbox)
 		case *events.HistorySync:
 			handleHistorySync(client, messageStore, v, logger)
 		case *events.Connected:
