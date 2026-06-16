@@ -96,8 +96,6 @@ func init() {
 	home, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "windows":
-		// signal-cli on Windows stores data in the Unix-style ~/.local/share/signal-cli/
-		// (not %APPDATA%\signal-cli\ as one might expect).  Try both and use whichever exists.
 		unixStyle := filepath.Join(home, ".local", "share", "signal-cli", "attachments")
 		appDataStyle := filepath.Join(os.Getenv("APPDATA"), "signal-cli", "attachments")
 		if _, err := os.Stat(unixStyle); err == nil {
@@ -215,10 +213,8 @@ func signalMarkSeen(key string) bool {
 	return false
 }
 
-// ─── sendSignalMessage ────────────────────────────────────────────────────────
+// ─── sendSignalFile ───────────────────────────────────────────────────────────
 
-// sendSignalFile sends a file attachment to a Signal chat via signal-cli's
-// JSON-RPC "send" method with the "attachments" parameter.
 func sendSignalFile(chatID, filePath string) {
 	signalConnMu.Lock()
 	conn := signalConn
@@ -285,7 +281,6 @@ func sendSignalMessage(chatID, message string) int64 {
 
 	id := atomic.AddInt64(&signalIDCounter, 1)
 
-	// Register a pending channel so the read loop can deliver the result.
 	resCh := make(chan int64, 1)
 	signalPendingSends.Store(id, resCh)
 
@@ -330,7 +325,6 @@ func sendSignalMessage(chatID, message string) int64 {
 	}
 	conn.SetWriteDeadline(time.Time{})
 
-	// Block until the read loop delivers the sent timestamp.
 	select {
 	case ts := <-resCh:
 		return ts
@@ -351,8 +345,6 @@ type signalAccountsFile struct {
 	} `json:"accounts"`
 }
 
-// detectSignalOwnerNumber reads signal-cli's accounts.json and returns the
-// registered phone number, or "" if not found.
 func detectSignalOwnerNumber() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -400,52 +392,31 @@ func InitOwnerNumber() {
 	log.Printf("Signal: owner number detected: %s", masked)
 }
 
-// ─── Bridge commands ──────────────────────────────────────────────────────────
-
-func handleSignalBridgeCommand(chatID, content string, isFromMe bool) bool {
-	return core.HandleBridgeCommand(chatID, content, isFromMe, core.ChannelHooks{
-		Send:               func(text string) { sendSignalMessage(chatID, text) },
-		AddAllowed:         core.AddSignalAllowedChat,
-		RemoveAllowed:      core.RemoveSignalAllowedChat,
-		SaveAllowed:        core.SaveSignalAllowedChats,
-		AddCodexAllowed:    core.AddSignalCodexAllowedChat,
-		RemoveCodexAllowed: core.RemoveSignalCodexAllowedChat,
-		SaveCodexAllowed:   core.SaveSignalCodexAllowedChats,
-	})
-}
-
 // ─── Message router ───────────────────────────────────────────────────────────
 
-func dispatchSignalContent(chatID, content string, inbox chan<- core.IncomingMessage) {
-	if content == "" || !core.IsSignalAllowedChat(chatID) {
-		return
-	}
-	setLastSignalActiveChat(chatID)
-	inbox <- core.IncomingMessage{
-		ChatID:      chatID,
-		Text:        content,
-		IsCodexChat: core.IsSignalCodexChat(chatID),
-		Reply: func(text string) string {
-			ts := sendSignalMessage(chatID, text)
+// buildSignalSender creates a Sender for a given chatID.
+func buildSignalSender(chatID string) *core.Sender {
+	return &core.Sender{
+		SendText: func(cid, text string) string {
+			ts := sendSignalMessage(cid, text)
 			if ts != 0 {
 				return fmt.Sprintf("%d", ts)
 			}
 			return ""
 		},
-		ReplyMedia: func(path string) {
-			sendSignalMessage(chatID, "📎 [test] output file: "+path)
-			sendSignalFile(chatID, path)
+		SendMedia: func(cid, path string) {
+			sendSignalMessage(cid, "📎 output file: "+path)
+			sendSignalFile(cid, path)
 		},
 	}
 }
 
-func handleSignalMessage(env signalEnvelope, inbox chan<- core.IncomingMessage) {
+// handleSignalMessage routes an envelope to the inbox as a RawMessage.
+func handleSignalMessage(env signalEnvelope, inbox chan<- core.RawMessage) {
 	if len(env.SyncMessage) > 0 && string(env.SyncMessage) != "null" {
-		// syncMessage is the "sent from another device" mirror — only valid when we are the sender.
-		// When someone else sends in a group, signal-cli emits both a dataMessage (correct, has
-		// downloaded attachments) and a spurious syncMessage; drop the syncMessage in that case.
+		// SyncMessage is the "sent from another device" mirror — only valid when we are the sender.
 		if env.Source != "" && signalOwnerNumber != "" && env.Source != signalOwnerNumber {
-			log.Printf("Signal: syncMessage from non-self source %s, skipping (handled by dataMessage)", env.Source)
+			log.Printf("Signal: syncMessage from non-self source %s, skipping", env.Source)
 			return
 		}
 		var sync signalSyncMessage
@@ -456,129 +427,149 @@ func handleSignalMessage(env signalEnvelope, inbox chan<- core.IncomingMessage) 
 		if sync.SentMessage == nil {
 			return
 		}
-		msg := sync.SentMessage
-		var chatID string
-		if msg.GroupInfo != nil && msg.GroupInfo.GroupId != "" {
-			chatID = msg.GroupInfo.GroupId
-		} else {
-			chatID = msg.Destination
-		}
-		if chatID == "" {
-			log.Printf("Signal: sentMessage has no chatID — skipping")
-			return
-		}
-		if handleSignalBridgeCommand(chatID, msg.Message, true) {
-			return
-		}
-		dedupeKey := fmt.Sprintf("%s:%d", chatID, msg.Timestamp)
-		if signalMarkSeen(dedupeKey) {
-			return
-		}
-
-		// ── Reaction in sync (owner reacted from their own device) ────────────
-		if msg.Reaction != nil {
-			r := msg.Reaction
-			log.Printf("Signal sync reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
-			if r.IsRemove || r.Emoji == "" || !core.IsSignalAllowedChat(chatID) {
-				return
-			}
-			targetKey := fmt.Sprintf("%d", r.TargetSentTimestamp)
-			text, found := core.LookupRecentMessage(chatID, targetKey)
-			if !found {
-				sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
-				return
-			}
-			prompt := core.LookupReactionPrompt(r.Emoji, text)
-			inbox <- core.IncomingMessage{
-				ChatID:      chatID,
-				Text:        prompt,
-				IsCodexChat: core.IsSignalCodexChat(chatID),
-				Reply: func(text string) string {
-					ts := sendSignalMessage(chatID, text)
-					if ts != 0 {
-						return fmt.Sprintf("%d", ts)
-					}
-					return ""
-				},
-				ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
-			}
-			return
-		}
-
-		content := msg.Message
-
-		// ── Reply context: prepend quoted message to prompt ──────────────────
-		if msg.Quote != nil {
-			quotedText := msg.Quote.Text
-			if quotedText == "" {
-				quotedText = "(no text)"
-			}
-			content = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quotedText, content)
-		}
-
-		if content == "" && len(msg.Attachments) > 0 {
-			transcript, err := transcribeSignalVoice(msg.Attachments)
-			if err != nil {
-				log.Printf("Signal: voice transcription error: %v", err)
-				sendSignalMessage(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
-				return
-			}
-			if transcript != "" {
-				content = "[🎤 Voice]: " + transcript
-			}
-		}
-		// Non-audio attachment (image) sent by the owner — process via LLM.
-		if content == "" && len(msg.Attachments) > 0 && core.IsSignalAllowedChat(chatID) {
-			log.Printf("Signal sync: image attachment(s) in chat=%s attachments=%d", chatID, len(msg.Attachments))
-			ch := NewSignalChannel()
-			inMsg := core.IncomingMessage{
-				ChatID:   chatID,
-				IsFromMe: true,
-				RawData:  msg.Attachments,
-			}
-			att, attErr := ch.ReceiveAttachment(inMsg)
-			if attErr != nil {
-				sendSignalMessage(chatID, "⚠️ Could not process attachment: "+attErr.Error())
-				return
-			}
-			if att == nil {
-				log.Printf("Signal sync: attachment file not found on disk for chat=%s — skipping", chatID)
-			}
-			if att != nil {
-				inbox <- core.IncomingMessage{
-					ChatID:      chatID,
-					IsCodexChat: core.IsSignalCodexChat(chatID),
-					Attachment:  att,
-					Reply: func(text string) string {
-						ts := sendSignalMessage(chatID, text)
-						if ts != 0 {
-							return fmt.Sprintf("%d", ts)
-						}
-						return ""
-					},
-					ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
-				}
-				return
-			}
-		}
-		if content == "" {
-			return
-		}
-		log.Printf("Signal sync← (chat=%s): %s", chatID, content)
-		core.StoreRecentMessage(chatID, fmt.Sprintf("%d", msg.Timestamp), content)
-		dispatchSignalContent(chatID, content, inbox)
+		emitSyncMessage(sync.SentMessage, inbox)
 		return
 	}
 
 	if env.DataMessage == nil {
 		return
 	}
+	emitDataMessage(env, inbox)
+}
 
-	content := env.DataMessage.Message
+func emitSyncMessage(msg *signalSyncSentMessage, inbox chan<- core.RawMessage) {
+	var chatID string
+	if msg.GroupInfo != nil && msg.GroupInfo.GroupId != "" {
+		chatID = msg.GroupInfo.GroupId
+	} else {
+		chatID = msg.Destination
+	}
+	if chatID == "" {
+		log.Printf("Signal: sentMessage has no chatID — skipping")
+		return
+	}
+
+	dedupeKey := fmt.Sprintf("%s:%d", chatID, msg.Timestamp)
+	if signalMarkSeen(dedupeKey) {
+		return
+	}
+
+	senderID := signalOwnerNumber
+	if senderID == "" {
+		senderID = chatID
+	}
+
+	textHint := msg.Message
+	if msg.Reaction != nil {
+		textHint = msg.Reaction.Emoji
+	}
+
+	sender := buildSignalSender(chatID)
+	msgCopy := *msg
+
+	inbox <- core.RawMessage{
+		ChatID:    chatID,
+		SenderID:  senderID,
+		IsFromMe:  true,
+		MessageID: fmt.Sprintf("%d", msg.Timestamp),
+		TextHint:  textHint,
+		Sender:    sender,
+		Parse: func() core.Event {
+			return parseSignalSyncEvent(chatID, senderID, &msgCopy, sender)
+		},
+	}
+}
+
+func parseSignalSyncEvent(chatID, senderID string, msg *signalSyncSentMessage, sender *core.Sender) core.Event {
+	base := core.Event{ChatID: chatID, SenderID: senderID, IsFromMe: true}
+
+	// Reaction
+	if msg.Reaction != nil {
+		r := msg.Reaction
+		log.Printf("Signal sync reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
+		if r.IsRemove || r.Emoji == "" {
+			return core.Event{Type: core.EventNone}
+		}
+		return core.Event{
+			Type:        core.EventReaction,
+			ChatID:      chatID,
+			SenderID:    senderID,
+			IsFromMe:    true,
+			Emoji:       r.Emoji,
+			QuotedMsgID: fmt.Sprintf("%d", r.TargetSentTimestamp),
+		}
+	}
+
+	content := msg.Message
+
+	// Quote context
+	if msg.Quote != nil {
+		quotedText := msg.Quote.Text
+		if quotedText == "" {
+			quotedText = "(no text)"
+		}
+		content = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quotedText, content)
+	}
+
+	// Command
+	if strings.HasPrefix(content, "!") {
+		return core.Event{Type: core.EventCommand, ChatID: chatID, SenderID: senderID, IsFromMe: true, Text: content}
+	}
+
+	// Audio transcription
+	if content == "" && len(msg.Attachments) > 0 {
+		transcript, err := transcribeSignalVoice(msg.Attachments)
+		if err != nil {
+			log.Printf("Signal sync: voice transcription error: %v", err)
+			sender.SendText(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
+			return core.Event{Type: core.EventNone}
+		}
+		if transcript != "" {
+			content = "[🎤 Voice]: " + transcript
+		}
+	}
+
+	// Non-audio attachment
+	if content == "" && len(msg.Attachments) > 0 {
+		path := resolveSignalAttachmentPath(msg.Attachments[0])
+		if path == "" {
+			log.Printf("Signal sync: attachment file not found for chat=%s — skipping", chatID)
+			return core.Event{Type: core.EventNone}
+		}
+		ct := strings.ToLower(msg.Attachments[0].ContentType)
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		return core.Event{
+			Type:     core.EventAttachment,
+			ChatID:   chatID,
+			SenderID: senderID,
+			IsFromMe: true,
+			Text:     base.Text,
+			Attachment: &core.Attachment{
+				LocalPath: path,
+				MimeType:  ct,
+			},
+		}
+	}
+
+	if content == "" {
+		return core.Event{Type: core.EventNone}
+	}
+
+	log.Printf("Signal sync← (chat=%s): %s", chatID, content)
+	core.StoreRecentMessage(chatID, fmt.Sprintf("%d", msg.Timestamp), content)
+	setLastSignalActiveChat(chatID)
+
+	return core.Event{Type: core.EventText, ChatID: chatID, SenderID: senderID, IsFromMe: true, Text: content}
+}
+
+func emitDataMessage(env signalEnvelope, inbox chan<- core.RawMessage) {
+	dm := env.DataMessage
 
 	var chatID string
-	if env.DataMessage.GroupInfo != nil && env.DataMessage.GroupInfo.GroupId != "" {
-		chatID = env.DataMessage.GroupInfo.GroupId
+	if dm.GroupInfo != nil && dm.GroupInfo.GroupId != "" {
+		chatID = dm.GroupInfo.GroupId
 	} else {
 		chatID = env.Source
 	}
@@ -586,50 +577,59 @@ func handleSignalMessage(env signalEnvelope, inbox chan<- core.IncomingMessage) 
 		return
 	}
 
-	if !core.IsSignalAllowedChat(chatID) {
-		if len(content) < 2 || content[:2] != "!m" {
-			return
-		}
-	}
-
-	dedupeKey := fmt.Sprintf("%s:%d", chatID, env.DataMessage.Timestamp)
+	dedupeKey := fmt.Sprintf("%s:%d", chatID, dm.Timestamp)
 	if signalMarkSeen(dedupeKey) {
 		return
 	}
 
-	// ── Reaction handling ─────────────────────────────────────────────────────
-	if env.DataMessage.Reaction != nil {
-		r := env.DataMessage.Reaction
-		log.Printf("Signal data reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
-		if r.IsRemove || r.Emoji == "" || !core.IsSignalAllowedChat(chatID) {
-			return
-		}
-		targetKey := fmt.Sprintf("%d", r.TargetSentTimestamp)
-		text, found := core.LookupRecentMessage(chatID, targetKey)
-		if !found {
-			sendSignalMessage(chatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
-			return
-		}
-		prompt := core.LookupReactionPrompt(r.Emoji, text)
-		inbox <- core.IncomingMessage{
-			ChatID:      chatID,
-			Text:        prompt,
-			IsCodexChat: core.IsSignalCodexChat(chatID),
-			Reply: func(text string) string {
-				ts := sendSignalMessage(chatID, text)
-				if ts != 0 {
-					return fmt.Sprintf("%d", ts)
-				}
-				return ""
-			},
-			ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
-		}
-		return
+	isFromMe := signalOwnerNumber != "" && env.Source == signalOwnerNumber
+
+	textHint := dm.Message
+	if dm.Reaction != nil {
+		textHint = dm.Reaction.Emoji
 	}
 
-	// ── Reply context: prepend quoted message to prompt ──────────────────────
-	if env.DataMessage.Quote != nil {
-		quotedText := env.DataMessage.Quote.Text
+	sender := buildSignalSender(chatID)
+	envCopy := env
+
+	inbox <- core.RawMessage{
+		ChatID:    chatID,
+		SenderID:  env.Source,
+		IsFromMe:  isFromMe,
+		MessageID: fmt.Sprintf("%d", dm.Timestamp),
+		TextHint:  textHint,
+		Sender:    sender,
+		Parse: func() core.Event {
+			return parseSignalDataEvent(chatID, envCopy, isFromMe, sender)
+		},
+	}
+}
+
+func parseSignalDataEvent(chatID string, env signalEnvelope, isFromMe bool, sender *core.Sender) core.Event {
+	dm := env.DataMessage
+
+	// Reaction
+	if dm.Reaction != nil {
+		r := dm.Reaction
+		log.Printf("Signal data reaction: emoji=%s remove=%v target=%d chat=%s", r.Emoji, r.IsRemove, r.TargetSentTimestamp, chatID)
+		if r.IsRemove || r.Emoji == "" {
+			return core.Event{Type: core.EventNone}
+		}
+		return core.Event{
+			Type:        core.EventReaction,
+			ChatID:      chatID,
+			SenderID:    env.Source,
+			IsFromMe:    isFromMe,
+			Emoji:       r.Emoji,
+			QuotedMsgID: fmt.Sprintf("%d", r.TargetSentTimestamp),
+		}
+	}
+
+	content := dm.Message
+
+	// Quote context
+	if dm.Quote != nil {
+		quotedText := dm.Quote.Text
 		if quotedText == "" {
 			quotedText = "(no text)"
 		}
@@ -638,61 +638,55 @@ func handleSignalMessage(env signalEnvelope, inbox chan<- core.IncomingMessage) 
 
 	log.Printf("Signal ← %s (chat=%s): %s", env.Source, chatID, content)
 
-	isFromMe := signalOwnerNumber != "" && env.Source == signalOwnerNumber
-	if handleSignalBridgeCommand(chatID, content, isFromMe) {
-		return
+	// Command
+	if strings.HasPrefix(content, "!") {
+		return core.Event{Type: core.EventCommand, ChatID: chatID, SenderID: env.Source, IsFromMe: isFromMe, Text: content}
 	}
 
-	if content == "" && len(env.DataMessage.Attachments) > 0 {
-		transcript, err := transcribeSignalVoice(env.DataMessage.Attachments)
+	// Audio transcription
+	if content == "" && len(dm.Attachments) > 0 {
+		transcript, err := transcribeSignalVoice(dm.Attachments)
 		if err != nil {
 			log.Printf("Signal: voice transcription error: %v", err)
-			sendSignalMessage(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
-			return
+			sender.SendText(chatID, "⚠️ Could not transcribe voice message: "+err.Error())
+			return core.Event{Type: core.EventNone}
 		}
 		if transcript != "" {
 			content = "[🎤 Voice]: " + transcript
 		}
 	}
 
-	// ── Non-audio attachment pipeline ─────────────────────────────────────────
-	if content == "" && len(env.DataMessage.Attachments) > 0 && core.IsSignalAllowedChat(chatID) && !isFromMe {
-		ch := NewSignalChannel()
-		inMsg := core.IncomingMessage{
+	// Non-audio attachment
+	if content == "" && len(dm.Attachments) > 0 {
+		path := resolveSignalAttachmentPath(dm.Attachments[0])
+		if path == "" {
+			log.Printf("Signal: attachment file not found for chat=%s — skipping", chatID)
+			return core.Event{Type: core.EventNone}
+		}
+		ct := strings.ToLower(dm.Attachments[0].ContentType)
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		return core.Event{
+			Type:     core.EventAttachment,
 			ChatID:   chatID,
 			SenderID: env.Source,
 			IsFromMe: isFromMe,
-			RawData:  env.DataMessage.Attachments,
-		}
-		att, attErr := ch.ReceiveAttachment(inMsg)
-		if attErr != nil {
-			sendSignalMessage(chatID, "⚠️ Could not process attachment: "+attErr.Error())
-			return
-		}
-		if att != nil {
-			inbox <- core.IncomingMessage{
-				ChatID:      chatID,
-				IsCodexChat: core.IsSignalCodexChat(chatID),
-				Attachment:  att,
-				Reply: func(text string) string {
-					ts := sendSignalMessage(chatID, text)
-					if ts != 0 {
-						return fmt.Sprintf("%d", ts)
-					}
-					return ""
-				},
-				ReplyMedia: func(path string) { sendSignalFile(chatID, path) },
-			}
-			return
+			Attachment: &core.Attachment{
+				LocalPath: path,
+				MimeType:  ct,
+			},
 		}
 	}
 
-	// Store incoming user message for reaction lookup.
-	if content != "" {
-		core.StoreRecentMessage(chatID, fmt.Sprintf("%d", env.DataMessage.Timestamp), content)
+	if content == "" {
+		return core.Event{Type: core.EventNone}
 	}
 
-	dispatchSignalContent(chatID, content, inbox)
+	core.StoreRecentMessage(chatID, fmt.Sprintf("%d", dm.Timestamp), content)
+	setLastSignalActiveChat(chatID)
+
+	return core.Event{Type: core.EventText, ChatID: chatID, SenderID: env.Source, IsFromMe: isFromMe, Text: content}
 }
 
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
@@ -726,7 +720,7 @@ func signalHeartbeat(conn net.Conn, stop <-chan struct{}) {
 
 // ─── Listener goroutine ───────────────────────────────────────────────────────
 
-func StartListener(inbox chan<- core.IncomingMessage) {
+func StartListener(inbox chan<- core.RawMessage) {
 	backoff := time.Second
 	for {
 		log.Printf("Signal: connecting to 127.0.0.1:7583...")
@@ -772,7 +766,6 @@ func StartListener(inbox chan<- core.IncomingMessage) {
 				if len(msg.Error) > 0 && string(msg.Error) != "null" {
 					log.Printf("Signal: RPC error id=%v: %s", msg.ID, string(msg.Error))
 				}
-				// Deliver sent timestamp to waiting sendSignalMessage call.
 				if len(msg.Result) > 0 && string(msg.Result) != "null" {
 					var result struct {
 						Timestamp int64 `json:"timestamp"`

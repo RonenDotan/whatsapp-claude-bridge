@@ -107,7 +107,7 @@ func WritePersonalityContextFile(chatID, preset string) error {
 	}
 	prompt := strings.TrimRight(personalityPrompts[preset], "\n")
 	filename := "CLAUDE.md"
-	if IsCodexChat(chatID) || IsSignalCodexChat(chatID) {
+	if IsCodexChat(chatID) {
 		filename = "AGENTS.md"
 	}
 	filePath := filepath.Join(dir, filename)
@@ -182,7 +182,7 @@ func SetIconForChat(chatID, emoji string) error {
 	const oldPrefix = "Always start every response with the emoji "
 	newLine := newPrefix + emoji + " emoji. This is mandatory. Never skip it."
 	filename := "CLAUDE.md"
-	if IsCodexChat(chatID) || IsSignalCodexChat(chatID) {
+	if IsCodexChat(chatID) {
 		filename = "AGENTS.md"
 	}
 	filePath := filepath.Join(dir, filename)

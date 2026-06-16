@@ -3,45 +3,10 @@ package signal
 import (
 	"os"
 	"path/filepath"
-	"strings"
-
-	"whatsapp-client/core"
 )
 
-// SignalChannel implements core.Channel for the Signal platform.
-type SignalChannel struct{}
-
-func NewSignalChannel() *SignalChannel { return &SignalChannel{} }
-func (c *SignalChannel) ID() string    { return "signal" }
-
-func (c *SignalChannel) ReceiveAttachment(msg core.IncomingMessage) (*core.Attachment, error) {
-	attachments, ok := msg.RawData.([]signalAttachment)
-	if !ok || len(attachments) == 0 {
-		return nil, nil
-	}
-	for _, a := range attachments {
-		ct := strings.ToLower(a.ContentType)
-		if strings.HasPrefix(ct, "audio/") || a.VoiceNote {
-			continue
-		}
-		path := resolveSignalAttachmentPath(a)
-		if path == "" {
-			continue
-		}
-		return &core.Attachment{
-			LocalPath: path,
-			MimeType:  ct,
-			Caption:   msg.Text,
-		}, nil
-	}
-	return nil, nil
-}
-
-func (c *SignalChannel) SendMessage(chatID, text string) error {
-	sendSignalMessage(chatID, text)
-	return nil
-}
-
+// resolveSignalAttachmentPath returns the absolute path of a signal attachment on disk,
+// or "" if the file cannot be located.
 func resolveSignalAttachmentPath(a signalAttachment) string {
 	switch {
 	case filepath.IsAbs(a.Filename):
@@ -67,5 +32,3 @@ func resolveSignalAttachmentPath(a signalAttachment) string {
 	}
 	return ""
 }
-
-var _ core.Channel = (*SignalChannel)(nil)

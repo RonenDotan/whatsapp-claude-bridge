@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"whatsapp-client/channels/signal"
 	"whatsapp-client/channels/whatsapp"
@@ -21,18 +22,15 @@ func main() {
 
 	core.BridgeVersion = Version
 	settings := core.LoadSettings()
-	log.Printf("Starting bridge: WhatsApp=%v Signal=%v", settings.WhatsAppEnabled, settings.SignalEnabled)
+	log.Printf("Starting bridge: WhatsApp=%v Signal=%v RestAPI=%v", settings.WhatsAppEnabled, settings.SignalEnabled, settings.RestAPIEnabled)
 
 	core.InitAllowedChats()
-	core.InitCodexAllowedChats()
-	core.InitSignalAllowedChats()
-	core.InitSignalCodexAllowedChats()
 	core.InitChatPersonalities()
 
-	inbox := make(chan core.IncomingMessage, 32)
+	inbox := make(chan core.RawMessage, 32)
 
 	if settings.WhatsAppEnabled {
-		go whatsapp.Start(inbox)
+		go whatsapp.Start(inbox, settings.RestAPIEnabled)
 	}
 	if settings.SignalEnabled {
 		signal.InitOwnerNumber()
@@ -42,78 +40,191 @@ func main() {
 	dispatch(inbox)
 }
 
-// dispatch is the main loop: reads messages from all channels and routes them to the right LLM.
-func dispatch(inbox <-chan core.IncomingMessage) {
-	for msg := range inbox {
-		m := msg
+// chatMutexes gates LLM subprocess calls per chat — bridge commands bypass this.
+var (
+	chatMutexesMu sync.Mutex
+	chatMutexes   = map[string]*sync.Mutex{}
+)
+
+func getChatMutex(chatID string) *sync.Mutex {
+	chatMutexesMu.Lock()
+	defer chatMutexesMu.Unlock()
+	if m, ok := chatMutexes[chatID]; ok {
+		return m
+	}
+	m := &sync.Mutex{}
+	chatMutexes[chatID] = m
+	return m
+}
+
+// dispatch is the main loop: reads RawMessages from all channels and routes them.
+func dispatch(inbox <-chan core.RawMessage) {
+	for r := range inbox {
+		raw := r
 		go func() {
-			if core.IsLooping(m.ChatID, m.Text) {
-				m.Reply("⚠️ You've sent the same message several times. Try rephrasing or type 'clear session' to start fresh.")
-				return
-			}
-			core.AddToInputHistory(m.ChatID, m.Text)
-
-			send := func(reply string) {
-				if id := m.Reply(reply); id != "" {
-					core.StoreRecentMessage(m.ChatID, id, reply)
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("PANIC in dispatch for chat=%s: %v", raw.ChatID, rec)
 				}
-			}
-
-			if strings.ToLower(strings.TrimSpace(m.Text)) == "!stats" {
-				send(statsReply(m))
-				return
-			}
-
-			if m.Attachment != nil {
-				var reply string
-				var err error
-				if m.IsCodexChat {
-					reply, err = codex.NewCodexLLM().ProcessWithAttachment(m.ChatID, m.Text, m.Attachment)
-				} else {
-					reply, err = claude.NewClaudeLLM().ProcessWithAttachment(m.ChatID, m.Text, m.Attachment)
-				}
-				if err != nil {
-					m.Reply("⚠️ Could not process attachment: " + err.Error())
-					return
-				}
-				send(reply)
-				return
-			}
-
-			if m.IsCodexChat {
-				codex.HandleWithCodex(m.ChatID, m.Text, send, m.ReplyMedia)
-			} else {
-				claude.HandleWithClaude(m.ChatID, m.Text, send, m.ReplyMedia)
-			}
+			}()
+			processMessage(raw)
 		}()
 	}
 }
 
-func statsReply(m core.IncomingMessage) string {
-	if m.IsCodexChat {
-		s, ok := core.GetCodexStats(m.ChatID)
-		if !ok {
-			return "No stats yet — send a message first."
+// processMessage runs the full filter + parse + route pipeline for one message.
+func processMessage(r core.RawMessage) {
+	// 1. Introduction check — catch !meet-* before allowed-list filter.
+	//    Only the owner can introduce a chat (IsFromMe).
+	if r.IsFromMe {
+		hint := strings.TrimSpace(r.TextHint)
+		if strings.HasPrefix(hint, "!meet-claude") {
+			introduceChat(r, "claude")
+			return
 		}
-		return fmt.Sprintf(
-			"📊 Codex stats:\n• Input tokens: %d\n• Output tokens: %d\n• Total tokens: %d\n• Last updated: %s",
-			s.InputTokens, s.OutputTokens, s.TotalTokens, s.LastUpdated)
-	}
-	s, ok := core.GetUsageStats(m.ChatID)
-	if !ok {
-		return "No stats yet — send a message first."
-	}
-	durationSec := float64(s.DurationMs) / 1000.0
-	reply := fmt.Sprintf(
-		"📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Response time: %.1fs\n• Last updated: %s",
-		s.CacheReadTokens, s.CacheWriteTokens,
-		s.InputTokens, s.OutputTokens,
-		s.TotalCostUSD, durationSec, s.LastUpdated)
-	if len(s.ModelUsage) > 1 {
-		reply += "\n\nPer-model breakdown:"
-		for model, mu := range s.ModelUsage {
-			reply += fmt.Sprintf("\n• %s: %d in / %d out, $%.4f", model, mu.InputTokens, mu.OutputTokens, mu.CostUSD)
+		if strings.HasPrefix(hint, "!meet-codex") {
+			introduceChat(r, "codex")
+			return
 		}
 	}
-	return reply
+
+	// 2. Allowed-list check.
+	if !core.IsAllowedChat(r.ChatID) {
+		return
+	}
+
+	// 3. Parse — may do network I/O (audio transcription, media download).
+	evt := r.Parse()
+	if evt.Type == core.EventNone {
+		return
+	}
+
+	// 4. Route by event type.
+	switch evt.Type {
+	case core.EventCommand:
+		handleCommand(evt, r.Sender)
+	case core.EventReaction:
+		handleReaction(evt, r.Sender)
+	case core.EventText, core.EventAttachment:
+		// Loop detection applies only to LLM-bound messages, not bridge commands.
+		if core.IsLooping(r.ChatID, evt.Text) {
+			r.Sender.SendText(r.ChatID, "⚠️ You've sent the same message several times. Try rephrasing or send `!clear-session` to start fresh.")
+			return
+		}
+		core.AddToInputHistory(r.ChatID, evt.Text)
+		handleLLM(evt, r.Sender)
+	}
+}
+
+// introduceChat adds a chat to the allowed list and writes its personality file.
+func introduceChat(r core.RawMessage, llm string) {
+	chatID := r.ChatID
+	// Add to allowed list first so IsCodexChat() works in WritePersonalityContextFile.
+	core.AddChatToAllowed(chatID, llm)
+	if err := core.SaveAllowedChats(); err != nil {
+		log.Printf("introduceChat: failed to save allowed chats: %v", err)
+	}
+	core.WritePersonalityContextFile(chatID, "default")
+	log.Printf("Introduced chat %s as %s", chatID, llm)
+	r.Sender.SendText(chatID, fmt.Sprintf("✅ Chat added with %s. Say hello!", strings.ToUpper(llm[:1])+llm[1:]))
+}
+
+// handleCommand executes a bridge command and applies side effects.
+func handleCommand(evt core.Event, sender *core.Sender) {
+	props := core.GetChatProperties(evt.ChatID)
+	result := core.HandleBridgeCommand(evt.ChatID, evt.Text, evt.IsFromMe, props)
+
+	if result.Reply != "" {
+		if id := sender.SendText(evt.ChatID, result.Reply); id != "" {
+			core.StoreRecentMessage(evt.ChatID, id, result.Reply)
+		}
+	}
+	if result.ClearSession {
+		core.DeleteSession(evt.ChatID)
+		core.DeleteCodexSession(evt.ChatID)
+		core.ClearInputHistory(evt.ChatID)
+	}
+	if result.InvalidateProps {
+		core.InvalidateChatProperties(evt.ChatID)
+	}
+	if result.RemoveFromAllowed {
+		core.RemoveChatFromAllowed(evt.ChatID)
+		if err := core.SaveAllowedChats(); err != nil {
+			log.Printf("handleCommand: failed to save allowed chats: %v", err)
+		}
+	}
+}
+
+// handleReaction resolves the target message and forwards a reaction prompt to the LLM.
+func handleReaction(evt core.Event, sender *core.Sender) {
+	text, found := core.LookupRecentMessage(evt.ChatID, evt.QuotedMsgID)
+	if !found {
+		sender.SendText(evt.ChatID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).")
+		return
+	}
+	prompt := core.LookupReactionPrompt(evt.Emoji, text)
+	llmEvt := core.Event{
+		Type:     core.EventText,
+		ChatID:   evt.ChatID,
+		SenderID: evt.SenderID,
+		IsFromMe: evt.IsFromMe,
+		Text:     prompt,
+	}
+	handleLLM(llmEvt, sender)
+}
+
+// handleLLM gates LLM subprocess calls per chat and sends the reply.
+func handleLLM(evt core.Event, sender *core.Sender) {
+	mu := getChatMutex(evt.ChatID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	props := core.GetChatProperties(evt.ChatID)
+	llmID := props.SelectedLLM
+	if llmID == "" {
+		llmID = core.GetChatLLM(evt.ChatID)
+	}
+
+	send := func(reply string) {
+		if id := sender.SendText(evt.ChatID, reply); id != "" {
+			core.StoreRecentMessage(evt.ChatID, id, reply)
+		}
+	}
+
+	chatDir, _ := core.EnsureChatDir(evt.ChatID)
+	tracker := core.NewSnapshotTracker(chatDir)
+	tracker.Before()
+
+	var err error
+	switch llmID {
+	case "codex":
+		if evt.Attachment != nil {
+			var reply string
+			reply, err = codex.NewCodexLLM().ProcessWithAttachment(evt.ChatID, evt.Text, evt.Attachment)
+			if err == nil && reply != "" {
+				send(reply)
+			}
+		} else {
+			codex.HandleWithCodex(evt.ChatID, evt.Text, send)
+		}
+	default: // "claude" or unknown
+		if evt.Attachment != nil {
+			var reply string
+			reply, err = claude.NewClaudeLLM().ProcessWithAttachment(evt.ChatID, evt.Text, evt.Attachment)
+			if err == nil && reply != "" {
+				send(reply)
+			}
+		} else {
+			claude.HandleWithClaude(evt.ChatID, evt.Text, send)
+		}
+	}
+
+	if err != nil {
+		sender.SendText(evt.ChatID, "⚠️ Could not process: "+err.Error())
+	}
+
+	// Send any files the LLM wrote to the chat directory.
+	for _, path := range tracker.After() {
+		sender.SendMedia(evt.ChatID, path)
+	}
 }
