@@ -513,7 +513,7 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 	return true, sendResp.ID
 }
 
-// ─── Media download ───────────────────────────────────────────────────────────
+// ─── Media download (REST API path) ──────────────────────────────────────────
 
 type MediaDownloader struct {
 	URL           string
@@ -525,12 +525,12 @@ type MediaDownloader struct {
 	MediaType     whatsmeow.MediaType
 }
 
-func (d *MediaDownloader) GetDirectPath() string        { return d.DirectPath }
-func (d *MediaDownloader) GetURL() string               { return d.URL }
-func (d *MediaDownloader) GetMediaKey() []byte          { return d.MediaKey }
-func (d *MediaDownloader) GetFileLength() uint64        { return d.FileLength }
-func (d *MediaDownloader) GetFileSHA256() []byte        { return d.FileSHA256 }
-func (d *MediaDownloader) GetFileEncSHA256() []byte     { return d.FileEncSHA256 }
+func (d *MediaDownloader) GetDirectPath() string            { return d.DirectPath }
+func (d *MediaDownloader) GetURL() string                   { return d.URL }
+func (d *MediaDownloader) GetMediaKey() []byte              { return d.MediaKey }
+func (d *MediaDownloader) GetFileLength() uint64            { return d.FileLength }
+func (d *MediaDownloader) GetFileSHA256() []byte            { return d.FileSHA256 }
+func (d *MediaDownloader) GetFileEncSHA256() []byte         { return d.FileEncSHA256 }
 func (d *MediaDownloader) GetMediaType() whatsmeow.MediaType { return d.MediaType }
 
 func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, messageID, chatJID string) (bool, string, string, string, error) {
@@ -698,7 +698,7 @@ func analyzeOggOpus(data []byte) (duration uint32, waveform []byte, err error) {
 	return duration, waveform, nil
 }
 
-func min(x, y int) int {
+func minInt(x, y int) int {
 	if x < y {
 		return x
 	}
@@ -710,7 +710,7 @@ func placeholderWaveform(duration uint32) []byte {
 	waveform := make([]byte, waveformLength)
 	rand.Seed(int64(duration))
 	baseAmplitude := 35.0
-	frequencyFactor := float64(min(int(duration), 120)) / 30.0
+	frequencyFactor := float64(minInt(int(duration), 120)) / 30.0
 	for i := range waveform {
 		pos := float64(i) / float64(waveformLength)
 		val := baseAmplitude * math.Sin(pos*math.Pi*frequencyFactor*8)
@@ -786,189 +786,174 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 	return name
 }
 
-// ─── Bridge command handler ───────────────────────────────────────────────────
-
-func handleBridgeCommand(client *whatsmeow.Client, chatJID, content string, isFromMe bool) bool {
-	send := func(text string) { sendWhatsAppMessage(client, chatJID, text, "") }
-	return core.HandleBridgeCommand(chatJID, content, isFromMe, core.ChannelHooks{
-		Send:               send,
-		AddAllowed:         core.AddAllowedChat,
-		RemoveAllowed:      core.RemoveAllowedChat,
-		SaveAllowed:        core.SaveAllowedChats,
-		AddCodexAllowed:    core.AddCodexAllowedChat,
-		RemoveCodexAllowed: core.RemoveCodexAllowedChat,
-		SaveCodexAllowed:   core.SaveCodexAllowedChats,
-	})
-}
-
 // ─── Message handler ──────────────────────────────────────────────────────────
 
-func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *events.Message, logger waLog.Logger, inbox chan<- core.IncomingMessage) {
+func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *events.Message, logger waLog.Logger, inbox chan<- core.RawMessage) {
 	chatJID := msg.Info.Chat.String()
 	sender := msg.Info.Sender.User
-	name := GetChatName(client, messageStore, msg.Info.Chat, chatJID, nil, sender, logger)
 
+	name := GetChatName(client, messageStore, msg.Info.Chat, chatJID, nil, sender, logger)
 	if err := messageStore.StoreChat(chatJID, name, msg.Info.Timestamp); err != nil {
 		logger.Warnf("Failed to store chat: %v", err)
 	}
 
-	// ── Reaction handling ─────────────────────────────────────────────────────
-	if reaction := msg.Message.GetReactionMessage(); reaction != nil {
-		emoji := reaction.GetText()
-		if emoji == "" || !core.IsAllowedChat(chatJID) {
-			return // un-react or non-monitored chat — ignore
-		}
-		origID := reaction.GetKey().GetID()
-		fmt.Printf("[reaction] %s reacted %s to message %q in chat %q\n", sender, emoji, origID, chatJID)
-		text, found := core.LookupRecentMessage(chatJID, origID)
-		if !found {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Can't react — message not in cache (too old or bridge was restarted).", "")
-			return
-		}
-		prompt := core.LookupReactionPrompt(emoji, text)
-		inbox <- core.IncomingMessage{
-			ChatID:      chatJID,
-			Text:        prompt,
-			IsCodexChat: core.IsCodexChat(chatJID),
-			Reply: func(text string) string {
-				_, msgID := sendWhatsAppMessage(client, chatJID, text, "")
-				return msgID
-			},
-			ReplyMedia: func(path string) { sendWhatsAppMessage(client, chatJID, "", path) },
-		}
+	// Skip messages the bridge itself sent (avoid echo loops).
+	if isSentByUs(msg.Info.ID) {
 		return
 	}
 
-	content := extractTextContent(msg.Message)
+	// Determine TextHint cheaply — no attachment download needed.
+	textHint := extractTextContent(msg.Message)
+	isReaction := msg.Message.GetReactionMessage() != nil
+	mediaType, _, _, _, _, _, _ := extractMediaInfo(msg.Message)
 
-	// ── Reply context: prepend quoted message to prompt ──────────────────────
-	if ext := msg.Message.GetExtendedTextMessage(); ext != nil {
-		if ctx := ext.GetContextInfo(); ctx != nil && ctx.GetQuotedMessage() != nil {
-			quotedText := extractTextContent(ctx.GetQuotedMessage())
-			if quotedText == "" {
-				quotedText = "(no text)"
+	// Drop truly empty messages (no text, no media, no reaction).
+	if textHint == "" && !isReaction && mediaType == "" {
+		return
+	}
+
+	// Reactions have no text hint.
+	if isReaction {
+		textHint = ""
+	}
+
+	// Sender delivers replies back through WhatsApp.
+	waSender := &core.Sender{
+		SendText: func(chatID, text string) string {
+			_, msgID := sendWhatsAppMessage(client, chatID, text, "")
+			return msgID
+		},
+		SendMedia: func(chatID, path string) {
+			sendWhatsAppMessage(client, chatID, "", path)
+		},
+	}
+
+	// Capture variables for the Parse closure (all owned data — safe to defer).
+	msgCopy := msg
+	ch := NewWhatsAppChannel(client, messageStore)
+
+	parse := func() core.Event {
+		// ── Reaction ──────────────────────────────────────────────────────────
+		if reaction := msgCopy.Message.GetReactionMessage(); reaction != nil {
+			emoji := reaction.GetText()
+			if emoji == "" || reaction.GetKey() == nil {
+				return core.Event{Type: core.EventNone}
 			}
-			content = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quotedText, content)
-		}
-	}
-
-	if !core.IsAllowedChat(chatJID) {
-		if len(content) < 2 || content[:2] != "!m" {
-			return
-		}
-	}
-
-	if handleBridgeCommand(client, chatJID, content, msg.Info.IsFromMe) {
-		return
-	}
-
-	mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength := extractMediaInfo(msg.Message)
-
-	if content == "" && mediaType == "" {
-		return
-	}
-
-	// Cache text content for reaction lookups
-	if content != "" {
-		core.StoreRecentMessage(chatJID, msg.Info.ID, content)
-	}
-
-	err := messageStore.StoreMessage(
-		msg.Info.ID, chatJID, sender, content, msg.Info.Timestamp, msg.Info.IsFromMe,
-		mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength,
-	)
-	if err != nil {
-		logger.Warnf("Failed to store message: %v", err)
-	} else {
-		timestamp := msg.Info.Timestamp.Format("2006-01-02 15:04:05")
-		direction := "←"
-		if msg.Info.IsFromMe {
-			direction = "→"
-		}
-		if mediaType != "" {
-			fmt.Printf("[%s] %s %s: [%s: %s] %s\n", timestamp, direction, sender, mediaType, filename, content)
-		} else if content != "" {
-			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
-		}
-	}
-
-	if mediaType == "audio" && content == "" && core.IsAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
-		// Use DownloadAny (same as images) — old client.Download path silently fails on modern whatsmeow
-		audioData, dlErr := client.DownloadAny(context.Background(), msg.Message)
-		if dlErr != nil {
-			fmt.Printf("Audio download failed for %s: %v\n", chatJID, dlErr)
-			sendWhatsAppMessage(client, chatJID, "⚠️ Could not download voice message: "+dlErr.Error(), "")
-			return
-		}
-		chatStorDir := filepath.Join("store", strings.ReplaceAll(chatJID, ":", "_"))
-		if err := os.MkdirAll(chatStorDir, 0755); err != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Could not save voice message: "+err.Error(), "")
-			return
-		}
-		audioFilename := "audio_" + time.Now().Format("20060102_150405") + ".ogg"
-		audioPath := filepath.Join(chatStorDir, audioFilename)
-		if err := os.WriteFile(audioPath, audioData, 0644); err != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Could not save voice message: "+err.Error(), "")
-			return
-		}
-		absPath, _ := filepath.Abs(audioPath)
-		fmt.Printf("Downloaded audio via DownloadAny to %s (%d bytes)\n", absPath, len(audioData))
-		transcript, txErr := core.TranscribeAudio(absPath)
-		if txErr != nil {
-			fmt.Printf("Audio transcription failed for %s: %v\n", chatJID, txErr)
-			sendWhatsAppMessage(client, chatJID, "⚠️ Could not transcribe voice message: "+txErr.Error(), "")
-			return
-		}
-		content = "[🎤 Voice]: " + transcript
-	}
-
-	replyFn := func(text string) string {
-		_, msgID := sendWhatsAppMessage(client, chatJID, text, "")
-		return msgID
-	}
-	replyMediaFn := func(path string) {
-		sendWhatsAppMessage(client, chatJID, "📎 [test] output file: "+path, "")
-		sendWhatsAppMessage(client, chatJID, "", path)
-	}
-
-	// ── Non-audio attachment pipeline ──────────────────────────────────────────
-	if mediaType != "" && mediaType != "audio" && core.IsAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
-		ch := NewWhatsAppChannel(client, messageStore)
-		inMsg := core.IncomingMessage{
-			ChatID:    chatJID,
-			SenderID:  sender,
-			Text:      content,
-			IsFromMe:  msg.Info.IsFromMe,
-			MessageID: msg.Info.ID,
-			RawData:   msg.Message,
-		}
-		att, attErr := ch.ReceiveAttachment(inMsg)
-		if attErr != nil {
-			sendWhatsAppMessage(client, chatJID, "⚠️ Could not download attachment: "+attErr.Error(), "")
-			return
-		}
-		if att != nil {
-			inbox <- core.IncomingMessage{
+			return core.Event{
+				Type:        core.EventReaction,
 				ChatID:      chatJID,
-				Text:        content,
-				IsCodexChat: core.IsCodexChat(chatJID),
-				Attachment:  att,
-				Reply:       replyFn,
-				ReplyMedia:  replyMediaFn,
+				SenderID:    sender,
+				IsFromMe:    msgCopy.Info.IsFromMe,
+				Emoji:       emoji,
+				QuotedMsgID: reaction.GetKey().GetID(),
 			}
-			return
 		}
-		// att == nil: unsupported media type — fall through to text path
+
+		text := extractTextContent(msgCopy.Message)
+
+		// ── Reply context: prepend quoted message ─────────────────────────────
+		if ext := msgCopy.Message.GetExtendedTextMessage(); ext != nil {
+			if ctx := ext.GetContextInfo(); ctx != nil && ctx.GetQuotedMessage() != nil {
+				quotedText := extractTextContent(ctx.GetQuotedMessage())
+				if quotedText == "" {
+					quotedText = "(no text)"
+				}
+				text = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quotedText, text)
+			}
+		}
+
+		// ── Command ───────────────────────────────────────────────────────────
+		if strings.HasPrefix(strings.TrimSpace(text), "!") {
+			return core.Event{
+				Type:     core.EventCommand,
+				ChatID:   chatJID,
+				SenderID: sender,
+				IsFromMe: msgCopy.Info.IsFromMe,
+				Text:     text,
+			}
+		}
+
+		mt, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength := extractMediaInfo(msgCopy.Message)
+
+		// Store text content for reaction lookups and message history.
+		if text != "" {
+			core.StoreRecentMessage(chatJID, msgCopy.Info.ID, text)
+		}
+		_ = messageStore.StoreMessage(
+			msgCopy.Info.ID, chatJID, sender, text, msgCopy.Info.Timestamp, msgCopy.Info.IsFromMe,
+			mt, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength,
+		)
+
+		// ── Audio: transcribe via Whisper ────────────────────────────────────
+		if mt == "audio" && text == "" {
+			audioData, dlErr := client.DownloadAny(context.Background(), msgCopy.Message)
+			if dlErr != nil {
+				waSender.SendText(chatJID, "⚠️ Could not download voice message: "+dlErr.Error())
+				return core.Event{Type: core.EventNone}
+			}
+			chatStorDir := filepath.Join("store", strings.ReplaceAll(chatJID, ":", "_"))
+			os.MkdirAll(chatStorDir, 0755)
+			audioPath := filepath.Join(chatStorDir, "audio_"+time.Now().Format("20060102_150405")+".ogg")
+			if err := os.WriteFile(audioPath, audioData, 0644); err != nil {
+				waSender.SendText(chatJID, "⚠️ Could not save voice message: "+err.Error())
+				return core.Event{Type: core.EventNone}
+			}
+			absPath, _ := filepath.Abs(audioPath)
+			transcript, txErr := core.TranscribeAudio(absPath)
+			if txErr != nil {
+				waSender.SendText(chatJID, "⚠️ Could not transcribe voice message: "+txErr.Error())
+				return core.Event{Type: core.EventNone}
+			}
+			return core.Event{
+				Type:     core.EventText,
+				ChatID:   chatJID,
+				SenderID: sender,
+				IsFromMe: msgCopy.Info.IsFromMe,
+				Text:     "[🎤 Voice]: " + transcript,
+			}
+		}
+
+		// ── Non-audio attachment ──────────────────────────────────────────────
+		if mt != "" && mt != "audio" {
+			att, attErr := ch.downloadFromProto(msgCopy.Message, chatJID, text)
+			if attErr != nil {
+				waSender.SendText(chatJID, "⚠️ Could not download attachment: "+attErr.Error())
+				return core.Event{Type: core.EventNone}
+			}
+			if att != nil {
+				return core.Event{
+					Type:       core.EventAttachment,
+					ChatID:     chatJID,
+					SenderID:   sender,
+					IsFromMe:   msgCopy.Info.IsFromMe,
+					Text:       text,
+					Attachment: att,
+				}
+			}
+			// Unsupported attachment type — fall through to text path.
+		}
+
+		// ── Plain text ────────────────────────────────────────────────────────
+		if text == "" {
+			return core.Event{Type: core.EventNone}
+		}
+		return core.Event{
+			Type:     core.EventText,
+			ChatID:   chatJID,
+			SenderID: sender,
+			IsFromMe: msgCopy.Info.IsFromMe,
+			Text:     text,
+		}
 	}
 
-	if content != "" && core.IsAllowedChat(chatJID) && !isSentByUs(msg.Info.ID) {
-		inbox <- core.IncomingMessage{
-			ChatID:      chatJID,
-			Text:        content,
-			IsCodexChat: core.IsCodexChat(chatJID),
-			Reply:       replyFn,
-			ReplyMedia:  replyMediaFn,
-		}
+	inbox <- core.RawMessage{
+		ChatID:    chatJID,
+		SenderID:  sender,
+		IsFromMe:  msg.Info.IsFromMe,
+		MessageID: msg.Info.ID,
+		TextHint:  textHint,
+		Sender:    waSender,
+		Parse:     parse,
 	}
 }
 
@@ -1083,7 +1068,7 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 	fmt.Printf("History sync complete. Stored %d messages.\n", syncedCount)
 }
 
-// ─── REST API ─────────────────────────────────────────────────────────────────
+// ─── REST API (optional — gated by RestAPIEnabled in settings) ────────────────
 
 type SendMessageResponse struct {
 	Success bool   `json:"success"`
@@ -1109,7 +1094,8 @@ type DownloadMediaResponse struct {
 }
 
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int) {
-	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -1137,7 +1123,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		json.NewEncoder(w).Encode(SendMessageResponse{Success: success, Message: message})
 	})
 
-	http.HandleFunc("/api/download", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/download", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -1176,7 +1162,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 	serverAddr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
 	go func() {
-		if err := http.ListenAndServe(serverAddr, nil); err != nil {
+		if err := http.ListenAndServe(serverAddr, mux); err != nil {
 			fmt.Printf("REST API server error: %v\n", err)
 		}
 	}()
@@ -1184,7 +1170,9 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 
 // ─── WhatsApp entry point ─────────────────────────────────────────────────────
 
-func Start(inbox chan<- core.IncomingMessage) {
+// Start connects to WhatsApp and forwards incoming messages to inbox.
+// If restAPIEnabled is true, also starts the HTTP server on :8080.
+func Start(inbox chan<- core.RawMessage, restAPIEnabled bool) {
 	logger := waLog.Stdout("Client", "INFO", true)
 	logger.Infof("Starting WhatsApp client...")
 
@@ -1278,5 +1266,10 @@ func Start(inbox chan<- core.IncomingMessage) {
 	}
 
 	fmt.Println("\n✓ Connected to WhatsApp!")
-	startRESTServer(client, messageStore, 8080)
+
+	if restAPIEnabled {
+		startRESTServer(client, messageStore, 8080)
+	} else {
+		fmt.Println("REST API disabled (set rest_api_enabled: true in settings.json to enable)")
+	}
 }

@@ -5,49 +5,52 @@ import (
 	"strings"
 )
 
-// ChannelHooks wires channel-specific operations into the shared command handler.
-type ChannelHooks struct {
-	Send               func(string)
-	AddAllowed         func(string)
-	RemoveAllowed      func(string)
-	SaveAllowed        func() error
-	AddCodexAllowed    func(string)
-	RemoveCodexAllowed func(string)
-	SaveCodexAllowed   func() error
+// CommandResult describes what main should do after a bridge command is handled.
+// HandleBridgeCommand is a pure function — it never mutates shared state directly.
+type CommandResult struct {
+	Reply             string // text to send back to the chat; "" means no reply
+	InvalidateProps   bool   // evict ChatProperties cache for this chat
+	ClearSession      bool   // clear LLM session and input history
+	RemoveFromAllowed bool   // remove chat from the allowed list
 }
 
-// HandleBridgeCommand processes a bridge command (any message starting with !)
-// using the provided channel hooks for send and whitelist operations.
-// Returns true if the message was a bridge command (handled or rejected), false otherwise.
-func HandleBridgeCommand(chatID, content string, isFromMe bool, h ChannelHooks) bool {
-	cmd := strings.TrimSpace(content)
+// HandleBridgeCommand processes a bridge command (any message starting with "!").
+// The caller (main) acts on the returned CommandResult for all state mutations.
+// Returns a zero CommandResult if the text is not a recognised bridge command.
+func HandleBridgeCommand(chatID, text string, isFromMe bool, props ChatProperties) CommandResult {
+	cmd := strings.TrimSpace(text)
+
 	isPersonality := strings.HasPrefix(cmd, "!set-personality")
 	isIcon := strings.HasPrefix(cmd, "!set-icon")
 
+	// Identify known commands before checking isFromMe so we can return the
+	// "owner only" error rather than silently ignoring them.
+	known := false
 	switch cmd {
-	case "!meet-claude", "!meet-codex", "!remove-claude", "!remove-codex",
-		"!help", "!clear-session", "!cancel", "!version":
-	default:
-		if !isPersonality && !isIcon {
-			return false
-		}
+	case "!help", "!version", "!cancel", "!clear-session", "!stats",
+		"!remove-claude", "!remove-codex":
+		known = true
+	}
+	if !known && !isPersonality && !isIcon {
+		return CommandResult{} // not a bridge command
 	}
 
 	if !isFromMe {
-		h.Send("⚠️ Only the bridge owner can use bridge commands")
-		return true
+		return CommandResult{Reply: "⚠️ Only the bridge owner can use bridge commands"}
 	}
+
+	// ── Stateless commands ────────────────────────────────────────────────────
 
 	switch cmd {
 	case "!help":
-		h.Send("Bridge commands:\n" +
-			"!meet-claude — add this chat to Claude whitelist\n" +
-			"!remove-claude — remove this chat from Claude whitelist\n" +
-			"!meet-codex — add this chat to Codex whitelist\n" +
-			"!remove-codex — remove this chat from Codex whitelist\n" +
-			"!clear-session — clear Claude/Codex session memory and start fresh\n" +
+		return CommandResult{Reply: "Bridge commands:\n" +
+			"!meet-claude — connect this chat to Claude\n" +
+			"!meet-codex — connect this chat to Codex\n" +
+			"!remove-claude / !remove-codex — disconnect this chat\n" +
+			"!clear-session — clear session memory and start fresh\n" +
 			"!cancel — cancel the currently running request\n" +
 			"!set-personality <preset> — set personality (default / kids / pro / creative)\n" +
+			"!set-icon <emoji> — prefix every response with an emoji\n" +
 			"!stats — show token usage and cost for this session\n" +
 			"!version — show bridge version\n" +
 			"!help — show this help screen\n" +
@@ -59,99 +62,105 @@ func HandleBridgeCommand(chatID, content string, isFromMe bool, h ChannelHooks) 
 			"🌍 — translate to English\n" +
 			"🇮🇱 — translate to Hebrew\n" +
 			"✅ — extract action items\n" +
-			"(any other emoji) — send reaction context to the LLM")
+			"(any other emoji) — send reaction context to the LLM"}
 
 	case "!version":
-		h.Send("Bridge version: " + BridgeVersion)
+		return CommandResult{Reply: "Bridge version: " + BridgeVersion}
 
 	case "!cancel":
 		if CancelRunning(chatID) {
-			h.Send("🛑 Cancelled.")
-		} else {
-			h.Send("Nothing is currently running.")
+			return CommandResult{Reply: "🛑 Cancelled."}
 		}
+		return CommandResult{Reply: "Nothing is currently running."}
 
-	case "!meet-claude":
-		h.AddAllowed(chatID)
-		if err := h.SaveAllowed(); err != nil {
-			h.Send("⚠️ Failed to save whitelist: " + err.Error())
-			return true
-		}
-		EnsureChatClaudeSettings(chatID)
-		h.Send("👋 Hi! I'm Claude. This chat is now connected to me — send any message to get started.")
-
-	case "!meet-codex":
-		h.AddCodexAllowed(chatID)
-		if err := h.SaveCodexAllowed(); err != nil {
-			h.Send("⚠️ Failed to save whitelist: " + err.Error())
-			return true
-		}
-		EnsureChatClaudeSettings(chatID)
-		h.Send("👋 Hi! I'm Codex. This chat is now connected to me — send any message to get started.")
-
-	case "!remove-claude":
-		h.RemoveAllowed(chatID)
-		if err := h.SaveAllowed(); err != nil {
-			h.Send("⚠️ Failed to save whitelist: " + err.Error())
-			return true
-		}
-		h.Send("✅ Claude has left this chat.")
-
-	case "!remove-codex":
-		h.RemoveCodexAllowed(chatID)
-		if err := h.SaveCodexAllowed(); err != nil {
-			h.Send("⚠️ Failed to save whitelist: " + err.Error())
-			return true
-		}
-		h.Send("✅ Codex has left this chat.")
+	case "!stats":
+		return CommandResult{Reply: buildStatsReply(chatID, props)}
 
 	case "!clear-session":
-		sessions := LoadSessions()
-		codexSessions := LoadCodexSessions()
-		_, hasSession := sessions[chatID]
-		_, hasCodexSession := codexSessions[chatID]
-		if !hasSession && !hasCodexSession {
-			h.Send("No active session to clear.")
-			return true
+		return CommandResult{
+			Reply:        "✅ Session cleared for this chat. Next message starts fresh.",
+			ClearSession: true,
 		}
-		ClearSessionData(chatID)
-		h.Send("✅ Session cleared for this chat. Next message starts fresh.")
+
+	case "!remove-claude", "!remove-codex":
+		return CommandResult{
+			Reply:             "✅ This chat has been disconnected from the bridge.",
+			RemoveFromAllowed: true,
+			ClearSession:      true,
+		}
 	}
+
+	// ── !set-personality ──────────────────────────────────────────────────────
 
 	if isPersonality {
 		parts := strings.Fields(cmd)
 		if len(parts) < 2 {
-			h.Send(fmt.Sprintf("Current personality: %s\nAvailable: default, kids, pro, creative", GetChatPersonality(chatID)))
-			return true
+			return CommandResult{Reply: fmt.Sprintf(
+				"Current personality: %s\nAvailable: default, kids, pro, creative",
+				props.Personality)}
 		}
 		preset := parts[1]
 		switch preset {
 		case "default", "kids", "pro", "creative":
 			if err := SetChatPersonality(chatID, preset); err != nil {
-				h.Send("⚠️ Failed to save personality: " + err.Error())
-				return true
+				return CommandResult{Reply: "⚠️ Failed to save personality: " + err.Error()}
 			}
-			ClearSessionData(chatID)
-			h.Send(fmt.Sprintf("✅ Personality set to: %s (session reset — changes take effect now)", preset))
+			return CommandResult{
+				Reply:           fmt.Sprintf("✅ Personality set to: %s (session reset — changes take effect now)", preset),
+				InvalidateProps: true,
+				ClearSession:    true,
+			}
 		default:
-			h.Send("⚠️ Unknown preset. Available: default, kids, pro, creative")
+			return CommandResult{Reply: "⚠️ Unknown preset. Available: default, kids, pro, creative"}
 		}
 	}
+
+	// ── !set-icon ─────────────────────────────────────────────────────────────
 
 	if isIcon {
 		parts := strings.Fields(cmd)
 		if len(parts) < 2 {
-			h.Send("Usage: !set-icon <emoji>")
-			return true
+			return CommandResult{Reply: "Usage: !set-icon <emoji>"}
 		}
 		emoji := parts[1]
 		if err := SetIconForChat(chatID, emoji); err != nil {
-			h.Send("⚠️ Failed to set icon: " + err.Error())
-			return true
+			return CommandResult{Reply: "⚠️ Failed to set icon: " + err.Error()}
 		}
-		ClearSessionData(chatID)
-		h.Send(fmt.Sprintf("✅ Icon set to: %s (session reset — changes take effect now)", emoji))
+		return CommandResult{
+			Reply:           fmt.Sprintf("✅ Icon set to: %s (session reset — changes take effect now)", emoji),
+			InvalidateProps: true,
+			ClearSession:    true,
+		}
 	}
 
-	return true
+	return CommandResult{}
+}
+
+func buildStatsReply(chatID string, props ChatProperties) string {
+	if props.SelectedLLM == "codex" {
+		s, ok := GetCodexStats(chatID)
+		if !ok {
+			return "No stats yet — send a message first."
+		}
+		return fmt.Sprintf(
+			"📊 Codex stats:\n• Input tokens: %d\n• Output tokens: %d\n• Total tokens: %d\n• Last updated: %s",
+			s.InputTokens, s.OutputTokens, s.TotalTokens, s.LastUpdated)
+	}
+	s, ok := GetUsageStats(chatID)
+	if !ok {
+		return "No stats yet — send a message first."
+	}
+	durationSec := float64(s.DurationMs) / 1000.0
+	reply := fmt.Sprintf(
+		"📊 Stats for this session:\n• Cache read: %d tokens\n• Cache write: %d tokens\n• Input tokens: %d\n• Output tokens: %d\n• Total cost: $%.4f USD\n• Response time: %.1fs\n• Last updated: %s",
+		s.CacheReadTokens, s.CacheWriteTokens,
+		s.InputTokens, s.OutputTokens,
+		s.TotalCostUSD, durationSec, s.LastUpdated)
+	if len(s.ModelUsage) > 1 {
+		reply += "\n\nPer-model breakdown:"
+		for model, mu := range s.ModelUsage {
+			reply += fmt.Sprintf("\n• %s: %d in / %d out, $%.4f", model, mu.InputTokens, mu.OutputTokens, mu.CostUSD)
+		}
+	}
+	return reply
 }

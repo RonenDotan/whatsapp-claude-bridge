@@ -29,7 +29,7 @@ func (l *CodexLLM) Process(chatID, text string) (string, error) {
 		} else {
 			result = reply
 		}
-	}, func(_ string) {})
+	})
 	return result, callErr
 }
 
@@ -140,7 +140,8 @@ func (l *CodexLLM) processWithAttachment(chatID, text string, att *core.Attachme
 }
 
 // HandleWithCodex calls the Codex CLI and delivers the reply via sendFn.
-func HandleWithCodex(chatID, messageText string, sendFn func(string), sendMediaFn func(string)) {
+// SnapshotTracker and media delivery are owned by the caller (main).
+func HandleWithCodex(chatID, messageText string, sendFn func(string)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -181,7 +182,7 @@ func HandleWithCodex(chatID, messageText string, sendFn func(string), sendMediaF
 
 	chatDirPath, dirErr := core.EnsureChatDir(chatID)
 	if dirErr != nil {
-		log.Printf("handleWithCodex: failed to create chat dir for %s: %v", chatID, dirErr)
+		log.Printf("HandleWithCodex: failed to create chat dir for %s: %v", chatID, dirErr)
 		chatDirPath = core.StoreDir()
 	}
 	if abs, err := filepath.Abs(chatDirPath); err == nil {
@@ -196,9 +197,6 @@ func HandleWithCodex(chatID, messageText string, sendFn func(string), sendMediaF
 			}
 		}
 	}
-
-	tracker := core.NewSnapshotTracker(chatDirPath)
-	tracker.Snapshot()
 
 	cmd := exec.CommandContext(ctx, "codex", args...)
 	cmd.Dir = chatDirPath
@@ -253,13 +251,6 @@ func HandleWithCodex(chatID, messageText string, sendFn func(string), sendMediaF
 	}
 
 	sendFn(replyText)
-
-	if files, err := tracker.Snapshot(); err == nil {
-		for _, path := range files {
-			fmt.Printf("Delivering output file to %s: %s\n", chatID, path)
-			sendMediaFn(path)
-		}
-	}
 }
 
 func ExtractCodexReply(output string) string {

@@ -9,6 +9,7 @@ import (
 type Settings struct {
 	WhatsAppEnabled bool `json:"whatsapp_enabled"`
 	SignalEnabled   bool `json:"signal_enabled"`
+	RestAPIEnabled  bool `json:"rest_api_enabled"` // enables /api/send and /api/download on :8080
 }
 
 func LoadSettings() Settings {

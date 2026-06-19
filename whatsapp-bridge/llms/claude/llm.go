@@ -30,7 +30,7 @@ func (l *ClaudeLLM) Process(chatID, text string) (string, error) {
 		} else {
 			result = reply
 		}
-	}, func(_ string) {})
+	})
 	return result, callErr
 }
 
@@ -150,7 +150,6 @@ func (l *ClaudeLLM) ProcessWithAttachment(chatID, text string, att *core.Attachm
 func ParseStreamJSONResult(chatID string, data []byte) (string, error) {
 	type resultEvent struct {
 		Type      string `json:"type"`
-		Subtype   string `json:"subtype"`
 		Result    string `json:"result"`
 		SessionID string `json:"session_id"`
 		IsError   bool   `json:"is_error"`
@@ -178,7 +177,8 @@ func ParseStreamJSONResult(chatID string, data []byte) (string, error) {
 }
 
 // HandleWithClaude calls the Claude CLI and delivers the reply via sendFn.
-func HandleWithClaude(chatID, messageText string, sendFn func(string), sendMediaFn func(string)) {
+// SnapshotTracker and media delivery are owned by the caller (main).
+func HandleWithClaude(chatID, messageText string, sendFn func(string)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -199,7 +199,7 @@ func HandleWithClaude(chatID, messageText string, sendFn func(string), sendMedia
 
 	chatDirPath, dirErr := core.EnsureChatDir(chatID)
 	if dirErr != nil {
-		log.Printf("handleWithClaude: failed to create chat dir for %s: %v", chatID, dirErr)
+		log.Printf("HandleWithClaude: failed to create chat dir for %s: %v", chatID, dirErr)
 		chatDirPath = core.DataDir()
 	}
 	if abs, err := filepath.Abs(chatDirPath); err == nil {
@@ -215,9 +215,6 @@ func HandleWithClaude(chatID, messageText string, sendFn func(string), sendMedia
 			messageText = prompt + "\n\n" + messageText
 		}
 	}
-
-	tracker := core.NewSnapshotTracker(chatDirPath)
-	tracker.Snapshot()
 
 	runClaude := func(a []string) ([]byte, error) {
 		c := exec.CommandContext(ctx, "claude", a...)
@@ -323,13 +320,6 @@ handleErr:
 	core.UsageStatsMu.Unlock()
 
 	sendFn(resp.Result)
-
-	if files, err := tracker.Snapshot(); err == nil {
-		for _, path := range files {
-			fmt.Printf("Delivering output file to %s: %s\n", chatID, path)
-			sendMediaFn(path)
-		}
-	}
 }
 
 // compile-time interface check
