@@ -61,8 +61,9 @@ func EnsureChatDir(chatID string) (string, error) {
 	return dir, os.MkdirAll(dir, 0755)
 }
 
-// EnsureChatClaudeSettings copies the per-session settings template into
+// EnsureChatClaudeSettings copies the permission template into
 // <chatDir>/.claude/settings.local.json if it does not already exist.
+// Uses the chat's stored permission level; defaults to god (bypassPermissions).
 func EnsureChatClaudeSettings(chatID string) {
 	claudeSubdir := filepath.Join(ChatDir(chatID), ".claude")
 	if err := os.MkdirAll(claudeSubdir, 0755); err != nil {
@@ -71,15 +72,28 @@ func EnsureChatClaudeSettings(chatID string) {
 	}
 	target := filepath.Join(claudeSubdir, "settings.local.json")
 	if _, err := os.Stat(target); err == nil {
+		return // already written (by ApplyPermission or a previous run)
+	}
+	p := GetChatPermission(chatID)
+	if err := applyClaudePermission(chatID, p); err != nil {
+		log.Printf("EnsureChatClaudeSettings: %v", err)
+	}
+}
+
+// EnsureChatCodexConfig copies the permission template into
+// <chatDir>/.codex/config.toml if it does not already exist.
+func EnsureChatCodexConfig(chatID string) {
+	codexSubdir := filepath.Join(ChatDir(chatID), ".codex")
+	if err := os.MkdirAll(codexSubdir, 0755); err != nil {
+		log.Printf("EnsureChatCodexConfig: failed to create .codex dir for %s: %v", chatID, err)
 		return
 	}
-	tmpl := filepath.Join(ConfigDir(), "templates", "settings", "settings.local.json")
-	data, err := os.ReadFile(tmpl)
-	if err != nil {
-		log.Printf("EnsureChatClaudeSettings: template not found at %s: %v", tmpl, err)
-		return
+	target := filepath.Join(codexSubdir, "config.toml")
+	if _, err := os.Stat(target); err == nil {
+		return // already written
 	}
-	if err := os.WriteFile(target, data, 0644); err != nil {
-		log.Printf("EnsureChatClaudeSettings: failed to write %s: %v", target, err)
+	p := GetChatPermission(chatID)
+	if err := applyCodexPermission(chatID, p); err != nil {
+		log.Printf("EnsureChatCodexConfig: %v", err)
 	}
 }

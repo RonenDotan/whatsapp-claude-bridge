@@ -12,6 +12,7 @@ const S = {
   health:        null,
   server:        null,
   accordionOpen: {},
+  permissions:   {},  // {chatID: {level, custom_allow}}
   // chat detail
   selectedChat:  null,
   chatLog:       [],
@@ -37,6 +38,9 @@ async function loadServer()  { S.server = await api('/api/server'); }
 async function loadChatLog(chatID) {
   const entries = await api(`/api/log?chat=${encodeURIComponent(chatID)}&limit=${LOG_LIMIT}`) || [];
   S.chatLog = entries.slice().reverse(); // API returns newest-first; we want oldest-first
+}
+async function loadPermissions() {
+  S.permissions = await api('/api/permissions') || {};
 }
 
 function updateSidebarVersion() {
@@ -111,6 +115,13 @@ function dot(ok) {
 }
 function badge(type) {
   return `<span class="badge ${type === 'codex' ? 'badge-codex' : 'badge-claude'}">${type || 'claude'}</span>`;
+}
+const PERM_LABELS = { standard: 'Std', developer: 'Dev', god: 'God', custom: 'Custom' };
+function permBadge(chatID) {
+  const p = S.permissions[chatID];
+  const lvl = p ? p.level : 'god';
+  const cls = lvl === 'god' ? 'badge-perm-god' : lvl === 'developer' ? 'badge-perm-dev' : lvl === 'custom' ? 'badge-perm-custom' : 'badge-perm-std';
+  return `<span class="badge ${cls}">${PERM_LABELS[lvl] || lvl}</span>`;
 }
 function chanIcon(ch) { return ch === 'signal' ? '📡' : '💬'; }
 
@@ -235,9 +246,43 @@ function chatRow(c) {
   </div>
   <div class="chat-row-right">
     ${lastMsg ? `<div class="chat-row-ts">${lastMsg}</div>` : ''}
-    ${badge(c.llm)}
+    <div style="display:flex;gap:4px">${badge(c.llm)}${permBadge(c.chat_id)}</div>
     <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
   </div>
+</div>`;
+}
+
+// ── Permissions panel (inside chat detail) ────────────────────────────────────
+const CLAUDE_EXTRA_TOOLS = ['Edit', 'Write', 'Bash'];
+
+function permPanel(c) {
+  const p      = S.permissions[c.chat_id] || { level: 'god', custom_allow: [] };
+  const lvl    = p.level;
+  const custom = p.custom_allow || [];
+  const presets = ['standard', 'developer', 'god', 'custom'];
+
+  const presetBtns = presets.map(l => {
+    const active = lvl === l;
+    return `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-ghost'} perm-preset" data-level="${l}" data-chatid="${escAttr(c.chat_id)}">${l.charAt(0).toUpperCase()+l.slice(1)}</button>`;
+  }).join('');
+
+  const customTools = lvl === 'custom' && c.llm !== 'codex' ? `
+<div class="perm-custom-tools" id="perm-custom-tools">
+  ${CLAUDE_EXTRA_TOOLS.map(t => `
+  <label class="perm-tool-label">
+    <input type="checkbox" class="perm-tool-cb" value="${t}" ${custom.includes(t) ? 'checked' : ''}> ${t}
+  </label>`).join('')}
+  <button class="btn btn-primary btn-sm" id="btn-save-custom" data-chatid="${escAttr(c.chat_id)}">Save</button>
+</div>` : '';
+
+  return `
+<div class="perm-panel card">
+  <div class="card-header">
+    <span class="card-title">Permissions</span>
+    ${permBadge(c.chat_id)}
+  </div>
+  <div class="perm-presets">${presetBtns}</div>
+  ${customTools}
 </div>`;
 }
 
@@ -270,6 +315,7 @@ function chatDetail(c) {
     <button class="btn btn-danger btn-sm" data-disconnect="${escAttr(c.chat_id)}" data-llm="${escAttr(c.llm)}">Off</button>
   </div>
 </div>
+${permPanel(c)}
 <div class="chat-messages" id="chat-messages">
   ${bubbles}
   ${typing}
@@ -394,7 +440,7 @@ function bindPageEvents() {
       S.chatLog      = [];
       S.chatSending  = false;
       renderPage(); // render immediately with empty log + spinner feel
-      try { await loadChatLog(id); } catch(e) { console.error(e); }
+      try { await Promise.all([loadChatLog(id), loadPermissions()]); } catch(e) { console.error(e); }
       renderPage();
       scrollChatBottom();
     };
@@ -438,6 +484,42 @@ function bindPageEvents() {
     inp.oninput = () => { inp.style.height = 'auto'; inp.style.height = Math.min(inp.scrollHeight, 120) + 'px'; };
     inp.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } };
   }
+
+  // Permission preset buttons
+  document.querySelectorAll('.perm-preset').forEach(btn => {
+    btn.onclick = async () => {
+      const chatID = btn.dataset.chatid;
+      const level  = btn.dataset.level;
+      if (level === 'custom') {
+        // just switch to custom UI, save later via btn-save-custom
+        if (!S.permissions[chatID]) S.permissions[chatID] = { level: 'god', custom_allow: [] };
+        S.permissions[chatID].level = 'custom';
+        renderPage();
+        return;
+      }
+      try {
+        await api('/api/permissions', { method: 'POST', body: JSON.stringify({ chat_id: chatID, level }) });
+        S.permissions[chatID] = { level, custom_allow: [] };
+        toast(`Permission set to ${level} — session cleared`);
+        renderPage();
+      } catch(e) { toast(e.message, 'error'); }
+    };
+  });
+
+  // Custom tool save
+  on('btn-save-custom', async () => {
+    const btn    = document.getElementById('btn-save-custom');
+    if (!btn) return;
+    const chatID = btn.dataset.chatid;
+    const checks = document.querySelectorAll('.perm-tool-cb');
+    const extra  = Array.from(checks).filter(cb => cb.checked).map(cb => cb.value);
+    try {
+      await api('/api/permissions', { method: 'POST', body: JSON.stringify({ chat_id: chatID, level: 'custom', custom_allow: extra }) });
+      S.permissions[chatID] = { level: 'custom', custom_allow: extra };
+      toast('Custom permissions saved — session cleared');
+      renderPage();
+    } catch(e) { toast(e.message, 'error'); }
+  });
 
   // Accordion toggles
   document.querySelectorAll('.chan-group-header').forEach(h => {

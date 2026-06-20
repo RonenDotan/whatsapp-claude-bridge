@@ -30,6 +30,7 @@ func Start(port int) {
 	mux.HandleFunc("/api/settings", handleSettings)
 	mux.HandleFunc("/api/cmd", handleCmd)
 	mux.HandleFunc("/api/send", handleSend)
+	mux.HandleFunc("/api/permissions", handlePermissions)
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[admin] listening on %s", addr)

@@ -28,6 +28,7 @@ func main() {
 	log.Printf("Starting bridge: WhatsApp=%v Signal=%v RestAPI=%v Admin=%v", settings.WhatsAppEnabled, settings.SignalEnabled, settings.RestAPIEnabled, settings.AdminEnabled)
 
 	core.InitAllowedChats()
+	core.InitPermissions()
 	core.InitChatPersonalities()
 	core.InitChatNames()
 	core.InitConvLog()
