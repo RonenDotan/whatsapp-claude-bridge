@@ -107,11 +107,17 @@ func processMessage(r core.RawMessage) {
 		handleReaction(evt, r.Sender)
 	case core.EventText, core.EventAttachment:
 		// Loop detection applies only to LLM-bound messages, not bridge commands.
-		if core.IsLooping(r.ChatID, evt.Text) {
+		// For captionless attachments use the local path as the key so that
+		// different images don't collide on the empty string.
+		loopKey := evt.Text
+		if evt.Attachment != nil && loopKey == "" {
+			loopKey = evt.Attachment.LocalPath
+		}
+		if core.IsLooping(r.ChatID, loopKey) {
 			r.Sender.SendText(r.ChatID, "⚠️ You've sent the same message several times. Try rephrasing or send `!clear-session` to start fresh.")
 			return
 		}
-		core.AddToInputHistory(r.ChatID, evt.Text)
+		core.AddToInputHistory(r.ChatID, loopKey)
 		handleLLM(evt, r.Sender)
 	}
 }
