@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Bridge Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <nav id="sidebar">
+      <div class="brand">
+        <span class="brand-icon">⚡</span>
+        <span class="brand-name">Bridge Admin</span>
+      </div>
+      <ul class="nav-list">
+        <li><a href="#dashboard" class="nav-link" data-page="dashboard">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z"/></svg>
+          Dashboard
+        </a></li>
+        <li><a href="#chats" class="nav-link" data-page="chats">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+          Chats
+        </a></li>
+        <li><a href="#health" class="nav-link" data-page="health">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Health
+        </a></li>
+        <li><a href="#server" class="nav-link" data-page="server">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="5" rx="1"/><circle cx="18" cy="5.5" r="1" fill="currentColor"/><circle cx="18" cy="12.5" r="1" fill="currentColor"/><circle cx="18" cy="19.5" r="1" fill="currentColor"/></svg>
+          Server
+        </a></li>
+      </ul>
+      <div class="sidebar-footer" id="sidebar-version"></div>
+    </nav>
+
+    <main id="content" class="content">
+      <div class="loading-screen">
+        <div class="spinner"></div>
+        <p>Connecting…</p>
+      </div>
+    </main>
+
+    <nav id="bottom-nav">
+      <a href="#dashboard" class="bn-link" data-page="dashboard">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z"/></svg>
+        <span>Home</span>
+      </a>
+      <a href="#chats" class="bn-link" data-page="chats">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+        <span>Chats</span>
+      </a>
+      <a href="#health" class="bn-link" data-page="health">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Health</span>
+      </a>
+      <a href="#server" class="bn-link" data-page="server">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="10" width="20" height="5" rx="1"/><rect x="2" y="17" width="20" height="5" rx="1"/></svg>
+        <span>Server</span>
+      </a>
+    </nav>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <span id="modal-title">Result</span>
+        <button id="modal-close" class="modal-close">✕</button>
+      </div>
+      <pre id="modal-body"></pre>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

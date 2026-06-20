@@ -81,6 +81,17 @@ func RemoveChatFromAllowed(chatID string) {
 	allowedChatsMu.Unlock()
 }
 
+// GetAllowedChats returns a snapshot of the current allowed-chat map.
+func GetAllowedChats() map[string]string {
+	allowedChatsMu.RLock()
+	defer allowedChatsMu.RUnlock()
+	out := make(map[string]string, len(allowedChats))
+	for k, v := range allowedChats {
+		out[k] = v
+	}
+	return out
+}
+
 // SaveAllowedChats persists the current allowed list to bridge-data/chats.json.
 func SaveAllowedChats() error {
 	allowedChatsMu.RLock()

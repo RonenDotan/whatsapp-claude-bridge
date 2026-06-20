@@ -6,7 +6,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"whatsapp-client/admin"
 	"whatsapp-client/channels/signal"
 	"whatsapp-client/channels/whatsapp"
 	"whatsapp-client/core"
@@ -21,11 +23,18 @@ func main() {
 	}
 
 	core.BridgeVersion = Version
+	core.StartTime = time.Now()
 	settings := core.LoadSettings()
-	log.Printf("Starting bridge: WhatsApp=%v Signal=%v RestAPI=%v", settings.WhatsAppEnabled, settings.SignalEnabled, settings.RestAPIEnabled)
+	log.Printf("Starting bridge: WhatsApp=%v Signal=%v RestAPI=%v Admin=%v", settings.WhatsAppEnabled, settings.SignalEnabled, settings.RestAPIEnabled, settings.AdminEnabled)
 
 	core.InitAllowedChats()
 	core.InitChatPersonalities()
+	core.InitChatNames()
+	core.InitConvLog()
+
+	if settings.AdminEnabled {
+		go admin.Start(settings.AdminPort)
+	}
 
 	inbox := make(chan core.RawMessage, 32)
 
@@ -118,6 +127,7 @@ func processMessage(r core.RawMessage) {
 			return
 		}
 		core.AddToInputHistory(r.ChatID, loopKey)
+		core.AppendLog(r.ChatID, "in", evt.Text, evt.Attachment != nil, 0)
 		handleLLM(evt, r.Sender)
 	}
 }
@@ -195,6 +205,11 @@ func handleLLM(evt core.Event, sender *core.Sender) {
 		if id := sender.SendText(evt.ChatID, reply); id != "" {
 			core.StoreRecentMessage(evt.ChatID, id, reply)
 		}
+		tokens := 0
+		if s, ok := core.GetUsageStats(evt.ChatID); ok {
+			tokens = s.OutputTokens
+		}
+		core.AppendLog(evt.ChatID, "out", reply, false, tokens)
 	}
 
 	chatDir, _ := core.EnsureChatDir(evt.ChatID)
