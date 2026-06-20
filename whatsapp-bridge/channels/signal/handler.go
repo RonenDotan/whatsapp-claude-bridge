@@ -737,6 +737,7 @@ func StartListener(inbox chan<- core.RawMessage) {
 
 		log.Printf("Signal: connected to signal-cli daemon")
 		backoff = time.Second
+		core.SetChannelStatus("signal", core.ChannelState{Connected: true, AccountID: signalOwnerNumber})
 
 		signalConnMu.Lock()
 		signalConn = conn
@@ -751,6 +752,7 @@ func StartListener(inbox chan<- core.RawMessage) {
 			var msg signalRPCMessage
 			if err := decoder.Decode(&msg); err != nil {
 				log.Printf("Signal: read error: %v — reconnecting", err)
+				core.SetChannelStatus("signal", core.ChannelState{Connected: false})
 				break
 			}
 			conn.SetReadDeadline(time.Time{})

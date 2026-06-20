@@ -796,6 +796,9 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 	if err := messageStore.StoreChat(chatJID, name, msg.Info.Timestamp); err != nil {
 		logger.Warnf("Failed to store chat: %v", err)
 	}
+	if name != "" {
+		core.SetChatName(chatJID, name)
+	}
 
 	// Skip messages the bridge itself sent (avoid echo loops).
 	if isSentByUs(msg.Info.ID) {
@@ -975,6 +978,10 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 		}
 
 		name := GetChatName(client, messageStore, jid, chatJID, conversation, "", logger)
+		if name != "" {
+			core.SetChatName(chatJID, name)
+		}
+
 		messages := conversation.Messages
 		if len(messages) == 0 {
 			continue
@@ -1221,8 +1228,14 @@ func Start(inbox chan<- core.RawMessage, restAPIEnabled bool) {
 			handleHistorySync(client, messageStore, v, logger)
 		case *events.Connected:
 			logger.Infof("Connected to WhatsApp")
+			accountID := ""
+			if client.Store.ID != nil {
+				accountID = client.Store.ID.User
+			}
+			core.SetChannelStatus("whatsapp", core.ChannelState{Connected: true, AccountID: accountID})
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please scan QR code to log in again")
+			core.SetChannelStatus("whatsapp", core.ChannelState{Connected: false})
 		}
 	})
 
