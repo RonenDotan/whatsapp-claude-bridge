@@ -119,7 +119,7 @@ function badge(type) {
 const PERM_LABELS = { standard: 'Std', developer: 'Dev', god: 'God', custom: 'Custom' };
 function permBadge(chatID) {
   const p = S.permissions[chatID];
-  const lvl = p ? p.level : 'god';
+  const lvl = p ? p.level : 'standard';
   const cls = lvl === 'god' ? 'badge-perm-god' : lvl === 'developer' ? 'badge-perm-dev' : lvl === 'custom' ? 'badge-perm-custom' : 'badge-perm-std';
   return `<span class="badge ${cls}">${PERM_LABELS[lvl] || lvl}</span>`;
 }

@@ -51,7 +51,7 @@ func GetChatPermission(chatID string) ChatPermission {
 	if p, ok := permMap[chatID]; ok {
 		return p
 	}
-	return ChatPermission{Level: PermGod}
+	return ChatPermission{Level: PermStandard}
 }
 
 func SetChatPermission(chatID string, p ChatPermission) {
