@@ -196,10 +196,14 @@ svg { width: 18px; height: 18px; flex-shrink: 0; fill: currentColor; }
   font-weight: 600;
   letter-spacing: .3px;
 }
-.badge-claude  { background: #1d2d50; color: #93c5fd; }
-.badge-codex   { background: #1a2e22; color: #86efac; }
-.badge-ok      { background: #1a2e22; color: #86efac; }
-.badge-error   { background: #2e1a1a; color: #fca5a5; }
+.badge-claude      { background: #1d2d50; color: #93c5fd; }
+.badge-codex       { background: #1a2e22; color: #86efac; }
+.badge-ok          { background: #1a2e22; color: #86efac; }
+.badge-error       { background: #2e1a1a; color: #fca5a5; }
+.badge-perm-std    { background: #1e2433; color: #94a3b8; }
+.badge-perm-dev    { background: #1a2535; color: #7dd3fc; }
+.badge-perm-god    { background: #2d1a36; color: #d8b4fe; }
+.badge-perm-custom { background: #2a2010; color: #fcd34d; }
 
 /* ── Buttons ─────────────────────────────────────────────────────────────────── */
 .btn {
@@ -708,6 +712,37 @@ svg { width: 18px; height: 18px; flex-shrink: 0; fill: currentColor; }
 }
 .chat-input:focus { border-color: var(--primary); }
 .chat-input::placeholder { color: var(--muted); }
+
+/* ── Permissions panel ────────────────────────────────────────────────────────── */
+.perm-panel {
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  flex-shrink: 0;
+}
+.perm-presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.perm-custom-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.perm-tool-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.perm-tool-label input { accent-color: var(--primary); }
 
 /* ── Command input in chat cards (legacy, kept for compat) ───────────────────── */
 .cmd-row {

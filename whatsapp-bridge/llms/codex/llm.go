@@ -64,8 +64,6 @@ func (l *CodexLLM) processWithAttachment(chatID, text string, att *core.Attachme
 		args = []string{
 			"exec", "--json", "--output-last-message", tmpFile,
 			"--skip-git-repo-check",
-			"--dangerously-bypass-approvals-and-sandbox",
-			"-s", "workspace-write",
 			"--image", att.LocalPath,
 		}
 	}
@@ -80,6 +78,7 @@ func (l *CodexLLM) processWithAttachment(chatID, text string, att *core.Attachme
 	}
 
 	if sessionID == "" {
+		core.EnsureChatCodexConfig(chatID)
 		agentsMdPath := filepath.Join(chatDirPath, "AGENTS.md")
 		if _, statErr := os.Stat(agentsMdPath); os.IsNotExist(statErr) {
 			if prompt := strings.TrimRight(core.GetPersonalityPrompt(chatID), "\n"); prompt != "" {
@@ -175,8 +174,6 @@ func HandleWithCodex(chatID, messageText string, sendFn func(string)) {
 			"--json",
 			"--output-last-message", tmpFile,
 			"--skip-git-repo-check",
-			"--dangerously-bypass-approvals-and-sandbox",
-			"-s", "workspace-write",
 			codexMessage}
 	}
 
@@ -190,6 +187,7 @@ func HandleWithCodex(chatID, messageText string, sendFn func(string)) {
 	}
 
 	if sessionID == "" {
+		core.EnsureChatCodexConfig(chatID)
 		agentsMdPath := filepath.Join(chatDirPath, "AGENTS.md")
 		if _, statErr := os.Stat(agentsMdPath); os.IsNotExist(statErr) {
 			if prompt := strings.TrimRight(core.GetPersonalityPrompt(chatID), "\n"); prompt != "" {

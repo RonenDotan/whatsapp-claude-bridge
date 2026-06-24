@@ -228,6 +228,48 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"reply": reply})
 }
 
+// GET /api/permissions          — returns {chat_id: ChatPermission, ...} for all chats
+// POST /api/permissions         — body: {chat_id, level, custom_allow?} — applies + clears session
+func handlePermissions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		chats := core.GetAllowedChats()
+		out := make(map[string]core.ChatPermission, len(chats))
+		for id := range chats {
+			out[id] = core.GetChatPermission(id)
+		}
+		writeJSON(w, out)
+
+	case http.MethodPost:
+		var body struct {
+			ChatID      string   `json:"chat_id"`
+			Level       string   `json:"level"`
+			CustomAllow []string `json:"custom_allow"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ChatID == "" || body.Level == "" {
+			errJSON(w, "chat_id and level are required", 400)
+			return
+		}
+		p := core.ChatPermission{
+			Level:       core.PermLevel(body.Level),
+			CustomAllow: body.CustomAllow,
+		}
+		llmType := core.GetChatLLM(body.ChatID)
+		if err := core.ApplyPermission(body.ChatID, llmType, p); err != nil {
+			errJSON(w, err.Error(), 500)
+			return
+		}
+		core.SetChatPermission(body.ChatID, p)
+		// clear sessions so next message uses new config
+		core.DeleteSession(body.ChatID)
+		core.DeleteCodexSession(body.ChatID)
+		writeJSON(w, map[string]any{"ok": true, "level": body.Level})
+
+	default:
+		errJSON(w, "method not allowed", 405)
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func chatChannel(chatID string) string {
